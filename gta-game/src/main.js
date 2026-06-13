@@ -164,9 +164,9 @@ function addTree(x, z) {
   leaves.castShadow = true;
   scene.add(trunk, leaves);
 }
-for (let i = 0; i < 10; i++) {
-  const a = (i / 10) * Math.PI * 2;
-  addTree(Math.cos(a) * 16, Math.sin(a) * 16);
+// trees sit in the plaza corners, clear of the roads that run along x=0 / z=0
+for (const [tx, tz] of [[14, 14], [-14, 14], [14, -14], [-14, -14], [20, 20], [-20, 20], [20, -20], [-20, -20]]) {
+  addTree(tx, tz);
 }
 
 // world boundary walls (invisible-ish low walls so you can't drive off)
@@ -241,31 +241,86 @@ function makeCarMesh(color) {
 
 const carColors = [0xd23b3b, 0x2e7bd2, 0xf0c020, 0x29a36a, 0xdddddd, 0x8c3bd2, 0xe87b2a, 0x222831];
 const cars = [];
-function spawnCars() {
-  // place cars along roads near intersections
-  let placed = 0;
-  const targets = 11;
-  let guard = 0;
-  while (placed < targets && guard++ < 400) {
-    const gx = Math.round(THREE.MathUtils.randInt(-3, 3)) * WORLD.block;
-    const gz = Math.round(THREE.MathUtils.randInt(-3, 3)) * WORLD.block;
-    const alongX = Math.random() < 0.5;
-    const x = alongX ? gx + THREE.MathUtils.randFloat(-18, 18) : gx + (Math.random() < 0.5 ? -3 : 3);
-    const z = alongX ? gz + (Math.random() < 0.5 ? -3 : 3) : gz + THREE.MathUtils.randFloat(-18, 18);
-    if (Math.abs(x) > WORLD.half - 6 || Math.abs(z) > WORLD.half - 6) continue;
-    const probe = { x, z };
-    if (resolveCircle(probe, 3)) continue; // overlaps a building
-    const color = carColors[placed % carColors.length];
-    const mesh = makeCarMesh(color);
-    const heading = alongX ? 0 : Math.PI / 2;
-    mesh.position.set(x, 0, z);
-    mesh.rotation.y = heading;
+
+// ---- road-grid navigation for AI traffic ----
+// Intersections sit at integer node coords (ix,iz) -> world (ix*block, iz*block).
+const NMIN = -4;
+const NMAX = 4;
+const LANE = 3.4; // perpendicular lane offset so opposing traffic doesn't overlap
+const DIRS = [{ x: 1, z: 0 }, { x: -1, z: 0 }, { x: 0, z: 1 }, { x: 0, z: -1 }];
+const clampNode = (n) => Math.max(NMIN, Math.min(NMAX, n));
+
+function laneTarget(ix, iz, dir) {
+  const w = new THREE.Vector3(ix * WORLD.block, 0, iz * WORLD.block);
+  if (dir.x !== 0) w.z += dir.x > 0 ? LANE : -LANE; // drive on the right
+  else w.x += dir.z > 0 ? -LANE : LANE;
+  return w;
+}
+
+// Pick the next intersection to head for (no U-turns, stay on the grid).
+function setNextLeg(car) {
+  const opts = [];
+  for (const d of DIRS) {
+    if (d.x === -car.dir.x && d.z === -car.dir.z) continue;
+    const nx = car.ix + d.x;
+    const nz = car.iz + d.z;
+    if (nx < NMIN || nx > NMAX || nz < NMIN || nz > NMAX) continue;
+    opts.push(d);
+  }
+  if (!opts.length) opts.push({ x: -car.dir.x, z: -car.dir.z }); // dead end: U-turn
+  const straight = opts.find((o) => o.x === car.dir.x && o.z === car.dir.z);
+  const d = straight && Math.random() < 0.6 ? straight : opts[(Math.random() * opts.length) | 0];
+  car.dir = { x: d.x, z: d.z };
+  car.tx = clampNode(car.ix + d.x);
+  car.tz = clampNode(car.iz + d.z);
+  car.target = laneTarget(car.tx, car.tz, car.dir);
+}
+
+// Hand a car (back) to the AI from wherever it currently is.
+function carToTraffic(car) {
+  car.ai = true;
+  car.ix = clampNode(Math.round(car.pos.x / WORLD.block));
+  car.iz = clampNode(Math.round(car.pos.z / WORLD.block));
+  const fwd = { x: Math.sin(car.heading), z: Math.cos(car.heading) };
+  car.dir = Math.abs(fwd.x) > Math.abs(fwd.z)
+    ? { x: Math.sign(fwd.x) || 1, z: 0 }
+    : { x: 0, z: Math.sign(fwd.z) || 1 };
+  setNextLeg(car);
+}
+
+function spawnTraffic() {
+  const used = new Set();
+  for (let i = 0; i < 14; i++) {
+    let ix, iz, guard = 0;
+    if (i === 0) { ix = 0; iz = 0; } // one near the player's spawn to grab quickly
+    else {
+      do {
+        ix = THREE.MathUtils.randInt(NMIN, NMAX);
+        iz = THREE.MathUtils.randInt(NMIN, NMAX);
+        guard++;
+      } while (used.has(`${ix},${iz}`) && guard < 50);
+    }
+    used.add(`${ix},${iz}`);
+    const dir = DIRS[(Math.random() * DIRS.length) | 0];
+    const mesh = makeCarMesh(carColors[i % carColors.length]);
+    const car = {
+      mesh,
+      pos: laneTarget(ix, iz, dir).clone(),
+      heading: Math.atan2(dir.x, dir.z),
+      speed: 0,
+      ai: true,
+      ix, iz,
+      dir: { x: dir.x, z: dir.z },
+      cruise: THREE.MathUtils.randFloat(11, 19),
+    };
+    setNextLeg(car);
+    mesh.position.copy(car.pos);
+    mesh.rotation.y = car.heading;
     scene.add(mesh);
-    cars.push({ mesh, pos: new THREE.Vector3(x, 0, z), heading, speed: 0, color });
-    placed++;
+    cars.push(car);
   }
 }
-spawnCars();
+spawnTraffic();
 
 // =============================================================
 //  Pedestrians
@@ -273,20 +328,45 @@ spawnCars();
 const peds = [];
 function makePed(color) {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.32, 0.8, 4, 8),
-    new THREE.MeshLambertMaterial({ color })
-  );
-  body.position.y = 0.95;
+  const torsoMat = new THREE.MeshLambertMaterial({ color });
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 0.5, 4, 8), torsoMat);
+  body.position.y = 1.05;
   body.castShadow = true;
   const head = new THREE.Mesh(
     new THREE.SphereGeometry(0.26, 10, 8),
     new THREE.MeshLambertMaterial({ color: 0xe0b78a })
   );
-  head.position.y = 1.65;
+  head.position.y = 1.62;
   head.castShadow = true;
   g.add(body, head);
+
+  // Limbs: each is a box hung from a pivot group so it swings from the joint.
+  const legMat = new THREE.MeshLambertMaterial({ color: 0x2b2f36 });
+  function limb(w, h, d, mat) {
+    const pivot = new THREE.Group();
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.y = -h / 2;
+    pivot.add(m);
+    return pivot;
+  }
+  const legL = limb(0.16, 0.56, 0.18, legMat); legL.position.set(0.13, 0.6, 0);
+  const legR = limb(0.16, 0.56, 0.18, legMat); legR.position.set(-0.13, 0.6, 0);
+  const armMat = new THREE.MeshLambertMaterial({ color });
+  const armL = limb(0.13, 0.5, 0.13, armMat); armL.position.set(0.36, 1.28, 0);
+  const armR = limb(0.13, 0.5, 0.13, armMat); armR.position.set(-0.36, 1.28, 0);
+  g.add(legL, legR, armL, armR);
+
+  g.userData = { body, head, torsoMat, armMat, legs: [legL, legR], arms: [armL, armR] };
   return g;
+}
+
+// Drive a character's limbs through a walk cycle (amp 0 = standing still).
+function animateWalk(refs, phase, amp) {
+  const s = Math.sin(phase) * amp;
+  refs.legs[0].rotation.x = s;
+  refs.legs[1].rotation.x = -s;
+  refs.arms[0].rotation.x = -s * 0.85;
+  refs.arms[1].rotation.x = s * 0.85;
 }
 const pedColors = [0x2b6cb0, 0xb02b2b, 0x2bb05a, 0xb0a52b, 0x6a2bb0, 0x444444, 0xcc6699];
 function spawnPeds() {
@@ -302,11 +382,12 @@ function spawnPeds() {
     scene.add(mesh);
     peds.push({
       mesh,
-      body: mesh.children[0],
-      head: mesh.children[1],
+      refs: mesh.userData,
+      head: mesh.userData.head,
       pos: new THREE.Vector3(x, 0, z),
       dir: Math.random() * Math.PI * 2,
       changeIn: Math.random() * 3,
+      walkPhase: Math.random() * 6,
       knocked: false,
       flyVel: new THREE.Vector3(),
       respawnIn: 0,
@@ -358,10 +439,10 @@ const player = {
   facing: 0,
   inCar: null, // car object or null
   radius: 0.5,
+  walkPhase: 0,
 };
-const playerMesh = makePed(0x101418);
-// give the player a distinct jacket colour
-playerMesh.children[0].material = new THREE.MeshLambertMaterial({ color: 0x101418 });
+const playerMesh = makePed(0x14223f); // distinct blue jacket
+const playerRefs = playerMesh.userData;
 scene.add(playerMesh);
 
 // =============================================================
@@ -603,7 +684,7 @@ function updateFoot(dt) {
     attackCooldown = 0.45;
   }
   attackSwing = Math.max(0, attackSwing - dt);
-  playerMesh.children[0].rotation.x = -attackSwing * 6;
+
   if (mag > 0.05) {
     tmp.normalize();
     player.facing = Math.atan2(tmp.x, tmp.z);
@@ -614,17 +695,36 @@ function updateFoot(dt) {
     player.pos.z = THREE.MathUtils.clamp(player.pos.z, -WORLD.half - 4, WORLD.half + 4);
     moving = true;
   }
+
+  // walk cycle / idle ease-out
+  if (moving) {
+    player.walkPhase += dt * 9 * Math.min(1, mag);
+    animateWalk(playerRefs, player.walkPhase, 0.6);
+  } else {
+    for (const l of [...playerRefs.legs, ...playerRefs.arms]) l.rotation.x *= 1 - Math.min(1, dt * 12);
+  }
+  // punch: throw the right arm forward + lean while swinging
+  if (attackSwing > 0) {
+    const k = attackSwing / 0.2;
+    playerRefs.arms[1].rotation.x = -1.6 * k;
+    playerRefs.body.rotation.x = -0.18 * k;
+  } else {
+    playerRefs.body.rotation.x = 0;
+  }
+
   playerMesh.position.copy(player.pos);
   playerMesh.rotation.y = player.facing;
   playerMesh.visible = true;
 
-  // enter nearest car
+  // hijack the nearest car (moving traffic included)
   if (consumeAction()) {
-    const car = nearestCar(4.5);
+    const car = nearestCar(5.5);
     if (car) {
       player.inCar = car;
+      car.ai = false;
       playerMesh.visible = false;
-      showHint('Nice ride.');
+      bumpWanted(0.5);
+      showHint('Carjacked!');
     } else {
       showHint('No car nearby');
     }
@@ -667,6 +767,22 @@ function updateCar(dt) {
   car.pos.x = THREE.MathUtils.clamp(car.pos.x, -WORLD.half - 2, WORLD.half + 2);
   car.pos.z = THREE.MathUtils.clamp(car.pos.z, -WORLD.half - 2, WORLD.half + 2);
 
+  // shove other cars out of the way (and get shoved back)
+  for (const o of cars) {
+    if (o === car) continue;
+    const to = car.pos.clone().sub(o.pos); to.y = 0;
+    const d = to.length();
+    if (d > 0.001 && d < 3.4) {
+      to.multiplyScalar(1 / d);
+      const push = 3.4 - d;
+      car.pos.addScaledVector(to, push * 0.55);
+      o.pos.addScaledVector(to, -push * 0.45);
+      o.mesh.position.copy(o.pos);
+      car.speed *= 0.9;
+      o.speed *= 0.4;
+    }
+  }
+
   car.mesh.position.copy(car.pos);
   car.mesh.rotation.y = car.heading;
   // subtle body roll on steering
@@ -696,13 +812,14 @@ function updateCar(dt) {
   // keep player position with the car
   player.pos.copy(car.pos);
 
-  // exit car
+  // exit car — hand it back to the AI traffic flow
   if (consumeAction()) {
     player.inCar = null;
     const side = new THREE.Vector3(Math.cos(car.heading), 0, -Math.sin(car.heading));
     player.pos.copy(car.pos).addScaledVector(side, 2.2);
     resolveCircle(player.pos, player.radius);
-    car.speed = 0;
+    car.speed = Math.max(0, car.speed * 0.4);
+    carToTraffic(car);
     showHint('On foot.');
   }
 
@@ -762,7 +879,7 @@ function updatePeds(dt) {
         ped.mesh.rotation.set(0, 0, 0);
         if (ped.headOff && ped.head) {
           ped.mesh.add(ped.head); // re-parent head back onto the body
-          ped.head.position.set(0, 1.65, 0);
+          ped.head.position.set(0, 1.62, 0);
           ped.head.rotation.set(0, 0, 0);
           ped.headOff = false;
         }
@@ -784,6 +901,50 @@ function updatePeds(dt) {
     }
     ped.mesh.position.copy(ped.pos);
     ped.mesh.rotation.y = ped.dir;
+    // stroll animation
+    ped.walkPhase += dt * 7;
+    animateWalk(ped.refs, ped.walkPhase, 0.5);
+  }
+}
+
+// AI traffic: cruise the road grid, brake for cars ahead, turn at junctions.
+function updateTraffic(dt) {
+  for (const car of cars) {
+    if (!car.ai || car === player.inCar) continue;
+    const fwd = new THREE.Vector3(Math.sin(car.heading), 0, Math.cos(car.heading));
+
+    // brake if something is close ahead (another car or the player on foot)
+    let blocked = false;
+    for (const o of cars) {
+      if (o === car) continue;
+      const to = o.pos.clone().sub(car.pos); to.y = 0;
+      const d = to.length();
+      if (d < 6.5 && d > 0.001 && to.multiplyScalar(1 / d).dot(fwd) > 0.7) { blocked = true; break; }
+    }
+    if (!player.inCar) {
+      const toP = player.pos.clone().sub(car.pos); toP.y = 0;
+      const dp = toP.length();
+      if (dp < 5 && dp > 0.001 && toP.multiplyScalar(1 / dp).dot(fwd) > 0.6) blocked = true;
+    }
+
+    const targetSpeed = blocked ? 0 : car.cruise;
+    car.speed += (targetSpeed - car.speed) * Math.min(1, dt * 3);
+
+    // steer toward the lane target, smoothing the heading
+    const toT = car.target.clone().sub(car.pos); toT.y = 0;
+    const dist = toT.length();
+    const desired = Math.atan2(toT.x, toT.z);
+    let diff = desired - car.heading;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    car.heading += diff * Math.min(1, dt * 6);
+
+    const f2 = new THREE.Vector3(Math.sin(car.heading), 0, Math.cos(car.heading));
+    car.pos.addScaledVector(f2, car.speed * dt);
+    car.mesh.position.copy(car.pos);
+    car.mesh.rotation.set(0, car.heading, 0);
+
+    if (dist < 2.2) { car.ix = car.tx; car.iz = car.tz; setNextLeg(car); }
   }
 }
 
@@ -842,6 +1003,7 @@ function frame(now) {
     document.querySelector('[data-btn="brake"]').textContent = 'ATTACK';
   }
 
+  updateTraffic(dt);
   updatePeds(dt);
   updatePickups(dt, t);
   updateBlood(dt);
