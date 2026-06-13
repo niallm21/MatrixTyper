@@ -13,10 +13,12 @@ are no assets to download and the APK stays tiny.
 
 - **Move:** on-screen joystick (left) or `WASD` / arrow keys
 - **Enter / exit a car:** `ENTER` button or `F`
-- **Brake / handbrake:** `BRAKE` button or `Space`
+- **Attack (on foot):** `ATTACK` button or `Space` — knock a pedestrian's head clean off
+- **Brake / handbrake (driving):** `BRAKE` button or `Space`
 - **Switch camera:** `CAM` button or `C`
 - Grab the glowing **cash**, drive around, cause a little chaos. Hitting
-  pedestrians raises your **wanted level** (it decays over time).
+  pedestrians (on foot or at speed in a car) decapitates them and raises your
+  **wanted level** (it decays over time).
 
 ## Run locally (in a browser)
 

@@ -302,13 +302,18 @@ function spawnPeds() {
     scene.add(mesh);
     peds.push({
       mesh,
+      body: mesh.children[0],
+      head: mesh.children[1],
       pos: new THREE.Vector3(x, 0, z),
       dir: Math.random() * Math.PI * 2,
       changeIn: Math.random() * 3,
-      vy: 0,
       knocked: false,
       flyVel: new THREE.Vector3(),
       respawnIn: 0,
+      headOff: false,
+      headVel: new THREE.Vector3(),
+      headSpin: new THREE.Vector3(),
+      stump: null,
     });
   }
 }
@@ -485,6 +490,88 @@ const CAR = {
 const FOOT = { speed: 7.5, accel: 16 };
 const tmp = new THREE.Vector3();
 
+// melee attack state
+let attackCooldown = 0;
+let attackSwing = 0;
+
+// Radial deadzone helper so a slightly off-centre stick (or a touch that
+// drifts) doesn't register as a constant turn — this is what made "straight"
+// curve into a circle.
+function deadzone(v, d = 0.14) {
+  if (Math.abs(v) < d) return 0;
+  return (v - Math.sign(v) * d) / (1 - d);
+}
+
+// ---- blood splatter particles ----
+const blood = [];
+const bloodGeo = new THREE.SphereGeometry(0.09, 5, 4);
+const bloodMat = new THREE.MeshLambertMaterial({ color: 0xb01515 });
+function spawnBlood(at, n = 9) {
+  for (let i = 0; i < n; i++) {
+    const m = new THREE.Mesh(bloodGeo, bloodMat);
+    m.position.copy(at);
+    scene.add(m);
+    blood.push({
+      m,
+      v: new THREE.Vector3((Math.random() - 0.5) * 6, 3 + Math.random() * 5, (Math.random() - 0.5) * 6),
+      life: 1.1,
+    });
+  }
+}
+function updateBlood(dt) {
+  for (let i = blood.length - 1; i >= 0; i--) {
+    const b = blood[i];
+    b.v.y -= 20 * dt;
+    b.m.position.addScaledVector(b.v, dt);
+    if (b.m.position.y < 0.05) { b.m.position.y = 0.05; b.v.set(0, 0, 0); }
+    b.life -= dt;
+    if (b.life <= 0) { scene.remove(b.m); blood.splice(i, 1); }
+  }
+}
+
+// Pop a pedestrian's head off and send the body sprawling.
+function decapitate(ped, dir, force) {
+  ped.knocked = true;
+  ped.respawnIn = 6;
+  if (!ped.headOff && ped.head) {
+    ped.headOff = true;
+    scene.attach(ped.head); // detach into world space, keeping position
+    ped.headVel.copy(dir).multiplyScalar(force).setY(8 + Math.random() * 3);
+    ped.headSpin.set((Math.random() - 0.5) * 14, (Math.random() - 0.5) * 14, (Math.random() - 0.5) * 14);
+    const stump = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.2, 0.24, 0.14, 8),
+      new THREE.MeshLambertMaterial({ color: 0x8a1f1f })
+    );
+    stump.position.set(0, 1.46, 0);
+    ped.mesh.add(stump);
+    ped.stump = stump;
+    spawnBlood(ped.pos.clone().setY(1.5));
+  }
+  ped.flyVel.copy(dir).multiplyScalar(force * 0.4);
+  ped.flyVel.y = 3;
+}
+
+// Swing at the nearest pedestrian in front of the player.
+function tryAttack() {
+  attackSwing = 0.2;
+  const fwd = new THREE.Vector3(Math.sin(player.facing), 0, Math.cos(player.facing));
+  let target = null;
+  let bestD = 2.6 * 2.6;
+  for (const ped of peds) {
+    if (ped.knocked) continue;
+    const to = ped.pos.clone().sub(player.pos); to.y = 0;
+    const d = to.lengthSq();
+    if (d < bestD && to.normalize().dot(fwd) > 0.1) { bestD = d; target = ped; }
+  }
+  if (target) {
+    const dir = target.pos.clone().sub(player.pos).setY(0).normalize();
+    decapitate(target, dir, 9);
+    bumpWanted(1);
+    cash += 10;
+    showHint('OFF WITH THE HEAD! +$10');
+  }
+}
+
 function nearestCar(maxDist) {
   let best = null;
   let bestD = maxDist * maxDist;
@@ -496,14 +583,27 @@ function nearestCar(maxDist) {
 }
 
 function updateFoot(dt) {
-  // camera-relative movement
+  // camera-relative movement. f = camera forward (into screen),
+  // r = camera right (screen-right). Earlier the right vector was inverted,
+  // which flipped left/right AND fed back through the follow-cam so that
+  // holding "forward" slowly curved into a circle.
+  const mx = deadzone(input.moveX);
+  const my = deadzone(input.moveY);
   const f = new THREE.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw));
-  const r = new THREE.Vector3(f.z, 0, -f.x);
+  const r = new THREE.Vector3(-f.z, 0, f.x);
   tmp.set(0, 0, 0)
-    .addScaledVector(f, input.moveY)
-    .addScaledVector(r, input.moveX);
+    .addScaledVector(f, my)
+    .addScaledVector(r, mx);
   const mag = tmp.length();
   let moving = false;
+
+  // attack (hold ATTACK / Space while on foot to swing repeatedly)
+  if (input.brake && attackCooldown <= 0) {
+    tryAttack();
+    attackCooldown = 0.45;
+  }
+  attackSwing = Math.max(0, attackSwing - dt);
+  playerMesh.children[0].rotation.x = -attackSwing * 6;
   if (mag > 0.05) {
     tmp.normalize();
     player.facing = Math.atan2(tmp.x, tmp.z);
@@ -534,8 +634,8 @@ function updateFoot(dt) {
 
 function updateCar(dt) {
   const car = player.inCar;
-  const throttle = input.moveY; // -1..1
-  const steerIn = input.moveX;
+  const throttle = deadzone(input.moveY); // -1..1
+  const steerIn = deadzone(input.moveX);
 
   // acceleration / reverse
   if (throttle > 0.05) car.speed += CAR.accel * throttle * dt;
@@ -577,11 +677,15 @@ function updateCar(dt) {
     for (const ped of peds) {
       if (ped.knocked) continue;
       if (ped.pos.distanceToSquared(car.pos) < 2.6 * 2.6) {
-        ped.knocked = true;
-        ped.respawnIn = 6;
         const dir = ped.pos.clone().sub(prev).setY(0).normalize();
-        ped.flyVel.copy(dir).multiplyScalar(Math.abs(car.speed) * 0.5 + 4);
-        ped.flyVel.y = 6 + Math.random() * 4;
+        if (Math.abs(car.speed) > 16) {
+          decapitate(ped, dir, Math.abs(car.speed) * 0.4 + 6);
+        } else {
+          ped.knocked = true;
+          ped.respawnIn = 6;
+          ped.flyVel.copy(dir).multiplyScalar(Math.abs(car.speed) * 0.5 + 4);
+          ped.flyVel.y = 6 + Math.random() * 4;
+        }
         bumpWanted(1);
         cash += 5; // chaos pays, apparently
         showHint('Watch it! +$5');
@@ -616,16 +720,37 @@ function bumpWanted(amount) {
 function updatePeds(dt) {
   for (const ped of peds) {
     if (ped.knocked) {
-      // simple ballistic ragdoll
+      // simple ballistic ragdoll for the body
       ped.flyVel.y -= 22 * dt;
       ped.pos.addScaledVector(ped.flyVel, dt);
+      if (ped.pos.y < 0) { ped.pos.y = 0; ped.flyVel.set(0, 0, 0); }
       ped.mesh.position.copy(ped.pos);
-      ped.mesh.rotation.x += dt * 6;
-      ped.mesh.rotation.z += dt * 4;
-      if (ped.pos.y < 0) ped.pos.y = 0;
+      if (ped.pos.y > 0.02) { // tumble while airborne, settle on the ground
+        ped.mesh.rotation.x += dt * 6;
+        ped.mesh.rotation.z += dt * 4;
+      } else {
+        ped.mesh.rotation.x = Math.PI / 2; // lying down
+      }
+
+      // the severed head flies and bounces on its own
+      if (ped.headOff && ped.head) {
+        ped.headVel.y -= 20 * dt;
+        ped.head.position.addScaledVector(ped.headVel, dt);
+        ped.head.rotation.x += ped.headSpin.x * dt;
+        ped.head.rotation.y += ped.headSpin.y * dt;
+        ped.head.rotation.z += ped.headSpin.z * dt;
+        if (ped.head.position.y < 0.26) {
+          ped.head.position.y = 0.26;
+          ped.headVel.x *= 0.6;
+          ped.headVel.z *= 0.6;
+          ped.headVel.y = Math.abs(ped.headVel.y) * 0.35;
+          ped.headSpin.multiplyScalar(0.7);
+        }
+      }
+
       ped.respawnIn -= dt;
       if (ped.respawnIn <= 0) {
-        // respawn somewhere fresh
+        // respawn somewhere fresh, fully reassembled
         let x, z, guard = 0;
         do {
           x = THREE.MathUtils.randFloat(-WORLD.half + 10, WORLD.half - 10);
@@ -635,6 +760,13 @@ function updatePeds(dt) {
         ped.pos.set(x, 0, z);
         ped.knocked = false;
         ped.mesh.rotation.set(0, 0, 0);
+        if (ped.headOff && ped.head) {
+          ped.mesh.add(ped.head); // re-parent head back onto the body
+          ped.head.position.set(0, 1.65, 0);
+          ped.head.rotation.set(0, 0, 0);
+          ped.headOff = false;
+        }
+        if (ped.stump) { ped.mesh.remove(ped.stump); ped.stump = null; }
       }
       continue;
     }
@@ -697,17 +829,22 @@ function frame(now) {
     camModeIdx = (camModeIdx + 1) % camModes.length;
   }
 
+  if (attackCooldown > 0) attackCooldown -= dt;
+
   if (player.inCar) {
     updateCar(dt);
     document.querySelector('[data-btn="action"]').textContent = 'EXIT';
+    document.querySelector('[data-btn="brake"]').textContent = 'BRAKE';
   } else {
     updateFoot(dt);
     ui.speedo.hidden = true;
     document.querySelector('[data-btn="action"]').textContent = 'ENTER';
+    document.querySelector('[data-btn="brake"]').textContent = 'ATTACK';
   }
 
   updatePeds(dt);
   updatePickups(dt, t);
+  updateBlood(dt);
 
   // wanted decays slowly
   if (wanted > 0) wanted = Math.max(0, wanted - dt * 0.06);
@@ -740,7 +877,7 @@ document.getElementById('start-btn').addEventListener('click', () => {
   overlay.classList.add('hidden');
   started = true;
   last = performance.now();
-  showHint('Find a car and press ENTER', 3);
+  showHint('ATTACK to knock heads off · ENTER a car to drive', 4);
 }, { once: true });
 
 // expose for quick console poking during dev
