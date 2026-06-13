@@ -1,6 +1,6 @@
 {
   "name": "matrixtyper-tauri",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A lightweight, distraction-free Matrix-style writing app built with Tauri.",
   "main": "index.js",
   "scripts": {

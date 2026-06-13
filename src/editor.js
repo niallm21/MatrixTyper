@@ -4,6 +4,7 @@ window.api = {
   openFileDialog: () => window.__TAURI__.core.invoke('open_file_dialog'),
   saveFileDialog: () => window.__TAURI__.core.invoke('save_file_dialog'),
   readAndDecryptFile: (path, password) => window.__TAURI__.core.invoke('read_and_decrypt_file', { path, password }),
+  getLaunchFilePath: () => window.__TAURI__.core.invoke('get_launch_file_path'),
   toggleFullscreen: () => window.__TAURI__.core.invoke('toggle_fullscreen'),
   quitApp: () => window.__TAURI__.core.invoke('quit_app'),
   showUnsavedPrompt: () => window.__TAURI__.core.invoke('show_unsaved_prompt'),
@@ -871,10 +872,18 @@ async function handleOpen() {
     const resultPath = await window.api.openFileDialog();
     if (!resultPath) return; // Cancelled
 
+    await loadFileFromPath(resultPath);
+  } catch (error) {
+    console.error('File open failed:', error);
+  }
+}
+
+async function loadFileFromPath(resultPath, statusMessage = 'DOCUMENT LOADED') {
+  try {
     let password = '';
     if (needsEncryptionPassword(resultPath)) {
       password = await promptPassword(false);
-      if (password === null) return; // Cancelled password
+      if (password === null) return false; // Cancelled password
     }
 
     const result = await window.api.readAndDecryptFile(resultPath, password);
@@ -888,12 +897,29 @@ async function handleOpen() {
       fileNameDisplay.textContent = fileName;
       markDirty(false);
       updateStats();
-      showStatusMessage('DOCUMENT LOADED');
+      showStatusMessage(statusMessage);
+      return true;
     } else {
       await window.api.showErrorDialog(`Error loading file: ${result.error}`);
+      return false;
     }
   } catch (error) {
     console.error('File open failed:', error);
+    return false;
+  }
+}
+
+async function loadLaunchFileIfAny() {
+  try {
+    if (!window.api?.getLaunchFilePath) return false;
+
+    const launchPath = await window.api.getLaunchFilePath();
+    if (!launchPath) return false;
+
+    return await loadFileFromPath(launchPath, 'DOCUMENT LOADED FROM WINDOWS');
+  } catch (error) {
+    console.error('Launch file load failed:', error);
+    return false;
   }
 }
 
@@ -1351,13 +1377,19 @@ function setupNativeCloseHandler() {
 
 
 // Page Initialization Load Process
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
   setupNativeCloseHandler();
   updateTopMenuClearance();
   if ('ResizeObserver' in window) {
     new ResizeObserver(updateTopMenuClearance).observe(topMenu);
   }
   loadSettings();
+
+  const loadedLaunchFile = await loadLaunchFileIfAny();
+  if (loadedLaunchFile) {
+    triggerFocus();
+    return;
+  }
 
   // Try to recover draft after crash or close
   const draftContent = localStorage.getItem('mt_draft_content');

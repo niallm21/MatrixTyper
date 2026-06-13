@@ -2,7 +2,10 @@ pub mod encryptor;
 
 use rfd::{FileDialog, MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
 use serde::Serialize;
-use std::{fs, path::Path};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 use tauri::{AppHandle, Manager, Window, WindowEvent};
 
 #[derive(Serialize)]
@@ -132,6 +135,88 @@ async fn save_file_dialog() -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+fn get_launch_file_path() -> Option<String> {
+    env::args_os().skip(1).find_map(|arg| {
+        let path = PathBuf::from(arg);
+        if path.is_file() {
+            Some(path.to_string_lossy().to_string())
+        } else {
+            None
+        }
+    })
+}
+
+fn decode_utf16_lossy(bytes: &[u8], little_endian: bool) -> String {
+    let units: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|chunk| {
+            if little_endian {
+                u16::from_le_bytes([chunk[0], chunk[1]])
+            } else {
+                u16::from_be_bytes([chunk[0], chunk[1]])
+            }
+        })
+        .collect();
+
+    String::from_utf16_lossy(&units)
+}
+
+fn looks_like_utf16(bytes: &[u8], little_endian: bool) -> bool {
+    let mut pairs = 0usize;
+    let mut nulls_in_high_byte = 0usize;
+    let mut asciiish_units = 0usize;
+
+    for chunk in bytes.chunks_exact(2).take(128) {
+        pairs += 1;
+        let high_byte = if little_endian { chunk[1] } else { chunk[0] };
+        let low_byte = if little_endian { chunk[0] } else { chunk[1] };
+
+        if high_byte == 0 {
+            nulls_in_high_byte += 1;
+        }
+
+        if high_byte == 0
+            && (low_byte == b'\n'
+                || low_byte == b'\r'
+                || low_byte == b'\t'
+                || (0x20..=0x7e).contains(&low_byte))
+        {
+            asciiish_units += 1;
+        }
+    }
+
+    pairs >= 2 && nulls_in_high_byte * 2 >= pairs && asciiish_units * 2 >= pairs
+}
+
+fn decode_text_file(bytes: Vec<u8>) -> String {
+    if bytes.starts_with(&[0xef, 0xbb, 0xbf]) {
+        return String::from_utf8_lossy(&bytes[3..]).into_owned();
+    }
+
+    if bytes.starts_with(&[0xff, 0xfe]) {
+        return decode_utf16_lossy(&bytes[2..], true);
+    }
+
+    if bytes.starts_with(&[0xfe, 0xff]) {
+        return decode_utf16_lossy(&bytes[2..], false);
+    }
+
+    match String::from_utf8(bytes) {
+        Ok(content) => content,
+        Err(error) => {
+            let bytes = error.into_bytes();
+            if looks_like_utf16(&bytes, true) {
+                decode_utf16_lossy(&bytes, true)
+            } else if looks_like_utf16(&bytes, false) {
+                decode_utf16_lossy(&bytes, false)
+            } else {
+                String::from_utf8_lossy(&bytes).into_owned()
+            }
+        }
+    }
+}
+
+#[tauri::command]
 async fn read_and_decrypt_file(
     path: String,
     password: Option<String>,
@@ -140,22 +225,13 @@ async fn read_and_decrypt_file(
     match fs::read(&path) {
         Ok(bytes) => {
             if path.to_lowercase().ends_with(".txt") {
-                return match String::from_utf8(bytes) {
-                    Ok(content) => Ok(OpenResponse {
-                        success: true,
-                        content: Some(content),
-                        file_path: Some(path),
-                        error: None,
-                        cancelled: None,
-                    }),
-                    Err(_) => Ok(OpenResponse {
-                        success: false,
-                        content: None,
-                        file_path: None,
-                        error: Some("Text file is not valid UTF-8.".into()),
-                        cancelled: None,
-                    }),
-                };
+                return Ok(OpenResponse {
+                    success: true,
+                    content: Some(decode_text_file(bytes)),
+                    file_path: Some(path),
+                    error: None,
+                    cancelled: None,
+                });
             }
 
             match encryptor::decrypt(&bytes, &pass) {
@@ -264,6 +340,7 @@ pub fn run() {
             save_file,
             open_file_dialog,
             save_file_dialog,
+            get_launch_file_path,
             read_and_decrypt_file,
             show_unsaved_prompt,
             show_error_dialog,
