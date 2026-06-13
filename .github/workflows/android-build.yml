@@ -1,0 +1,67 @@
+name: Build Liberty Clone APK
+
+# Builds the 3D game in gta-game/ into an installable Android APK.
+# Runs on a GitHub-hosted runner because the Android SDK + Google Maven
+# (needed for every Android build) are unreachable from the dev sandbox.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/gta-android-clone-81dntu
+    paths:
+      - 'gta-game/**'
+      - '.github/workflows/android-build.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gta-game
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build web bundle
+        run: npm run build
+
+      - name: Add Android platform
+        run: npx --no-install cap add android
+
+      - name: Sync web assets into Android project
+        run: npx --no-install cap sync android
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        working-directory: gta-game/android
+
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk liberty-clone.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: liberty-clone-apk
+          path: gta-game/liberty-clone.apk
+          if-no-files-found: error

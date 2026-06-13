@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0b0e14" />
+    <title>Liberty Clone</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <div id="game-root">
+      <canvas id="scene"></canvas>
+
+      <!-- HUD -->
+      <div id="hud">
+        <div id="hud-top-left">
+          <div id="cash">$<span data-cash>0</span></div>
+          <div id="wanted" aria-label="wanted level"></div>
+        </div>
+        <div id="hud-top-right">
+          <canvas id="minimap" width="150" height="150"></canvas>
+        </div>
+        <div id="speedo" hidden>
+          <span data-speed>0</span><small>km/h</small>
+        </div>
+        <div id="hint" data-hint></div>
+      </div>
+
+      <!-- Touch controls -->
+      <div id="touch" aria-hidden="true">
+        <div id="joystick">
+          <div id="joystick-base">
+            <div id="joystick-knob"></div>
+          </div>
+        </div>
+        <div id="buttons">
+          <button class="btn btn-brake" data-btn="brake">BRAKE</button>
+          <button class="btn btn-action" data-btn="action">ENTER</button>
+          <button class="btn btn-cam" data-btn="camera">CAM</button>
+        </div>
+      </div>
+
+      <!-- Start / loading screen -->
+      <div id="overlay">
+        <div class="overlay-card">
+          <h1>LIBERTY<span>CLONE</span></h1>
+          <p class="tag">A tiny 3D open-world joyride.</p>
+          <ul class="how">
+            <li><b>Move:</b> joystick / WASD</li>
+            <li><b>Enter / exit car:</b> ENTER button / <kbd>F</kbd></li>
+            <li><b>Brake / handbrake:</b> BRAKE button / <kbd>Space</kbd></li>
+            <li><b>Camera:</b> CAM button / <kbd>C</kbd></li>
+            <li>Grab the glowing <b>cash</b>, cause a little chaos.</li>
+          </ul>
+          <button id="start-btn">DROP INTO LIBERTY CITY</button>
+          <p class="fine">Drive responsibly. Or don't. It's a sandbox.</p>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
