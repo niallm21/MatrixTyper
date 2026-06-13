@@ -440,6 +440,10 @@ const player = {
   inCar: null, // car object or null
   radius: 0.5,
   walkPhase: 0,
+  knocked: false,
+  flyVel: new THREE.Vector3(),
+  downTimer: 0,
+  grace: 0,
 };
 const playerMesh = makePed(0x14223f); // distinct blue jacket
 const playerRefs = playerMesh.userData;
@@ -663,6 +667,43 @@ function nearestCar(maxDist) {
   return best;
 }
 
+// Oriented-box hitbox test: is world point p inside this car's body (padded)?
+const CAR_HALF_F = 2.2; // half length (along travel)
+const CAR_HALF_R = 1.05; // half width
+function pointInCar(car, p, pad) {
+  const dx = p.x - car.pos.x;
+  const dz = p.z - car.pos.z;
+  const sin = Math.sin(car.heading);
+  const cos = Math.cos(car.heading);
+  const localF = dx * sin + dz * cos;     // forward axis
+  const localR = dx * cos - dz * sin;     // right axis
+  return Math.abs(localF) < CAR_HALF_F + pad && Math.abs(localR) < CAR_HALF_R + pad;
+}
+
+// Knock a pedestrian down (ragdoll), decapitating on a fast enough hit.
+function hitPed(ped, dir, speed) {
+  if (speed > 17 && Math.random() < 0.5) {
+    decapitate(ped, dir, speed * 0.4 + 6);
+  } else {
+    ped.knocked = true;
+    ped.respawnIn = 6;
+    ped.flyVel.copy(dir).multiplyScalar(speed * 0.5 + 4);
+    ped.flyVel.y = 6 + Math.random() * 4;
+  }
+}
+
+// Launch the player into a ragdoll when a car hits them on foot.
+function knockPlayer(dir, speed) {
+  player.knocked = true;
+  player.inCar = null;
+  player.downTimer = 2.2;
+  player.grace = 0;
+  player.flyVel.copy(dir).multiplyScalar(speed * 0.45 + 4);
+  player.flyVel.y = 6 + Math.random() * 3;
+  spawnBlood(player.pos.clone().setY(1));
+  showHint('Splat!');
+}
+
 function updateFoot(dt) {
   // camera-relative movement. f = camera forward (into screen),
   // r = camera right (screen-right). Earlier the right vector was inverted,
@@ -788,20 +829,13 @@ function updateCar(dt) {
   // subtle body roll on steering
   car.mesh.rotation.z = -steerIn * speedFactor * 0.06;
 
-  // run over pedestrians
+  // run over pedestrians (oriented hitbox)
   if (Math.abs(car.speed) > 4) {
     for (const ped of peds) {
       if (ped.knocked) continue;
-      if (ped.pos.distanceToSquared(car.pos) < 2.6 * 2.6) {
+      if (pointInCar(car, ped.pos, 0.4)) {
         const dir = ped.pos.clone().sub(prev).setY(0).normalize();
-        if (Math.abs(car.speed) > 16) {
-          decapitate(ped, dir, Math.abs(car.speed) * 0.4 + 6);
-        } else {
-          ped.knocked = true;
-          ped.respawnIn = 6;
-          ped.flyVel.copy(dir).multiplyScalar(Math.abs(car.speed) * 0.5 + 4);
-          ped.flyVel.y = 6 + Math.random() * 4;
-        }
+        hitPed(ped, dir, Math.abs(car.speed));
         bumpWanted(1);
         cash += 5; // chaos pays, apparently
         showHint('Watch it! +$5');
@@ -913,7 +947,9 @@ function updateTraffic(dt) {
     if (!car.ai || car === player.inCar) continue;
     const fwd = new THREE.Vector3(Math.sin(car.heading), 0, Math.cos(car.heading));
 
-    // brake if something is close ahead (another car or the player on foot)
+    // brake if something is close ahead (another car or the player on foot).
+    // NOTE: traffic yields to *cars* and to *the player*, but not to wandering
+    // pedestrians — jaywalkers get run over.
     let blocked = false;
     for (const o of cars) {
       if (o === car) continue;
@@ -921,10 +957,10 @@ function updateTraffic(dt) {
       const d = to.length();
       if (d < 6.5 && d > 0.001 && to.multiplyScalar(1 / d).dot(fwd) > 0.7) { blocked = true; break; }
     }
-    if (!player.inCar) {
+    if (!player.inCar && !player.knocked) {
       const toP = player.pos.clone().sub(car.pos); toP.y = 0;
       const dp = toP.length();
-      if (dp < 5 && dp > 0.001 && toP.multiplyScalar(1 / dp).dot(fwd) > 0.6) blocked = true;
+      if (dp < 8 && dp > 0.001 && toP.multiplyScalar(1 / dp).dot(fwd) > 0.45) blocked = true;
     }
 
     const targetSpeed = blocked ? 0 : car.cruise;
@@ -944,8 +980,42 @@ function updateTraffic(dt) {
     car.mesh.position.copy(car.pos);
     car.mesh.rotation.set(0, car.heading, 0);
 
+    // traffic can mow down pedestrians and the player
+    if (car.speed > 3) {
+      for (const ped of peds) {
+        if (ped.knocked) continue;
+        if (pointInCar(car, ped.pos, 0.4)) hitPed(ped, f2.clone(), car.speed);
+      }
+      if (!player.inCar && !player.knocked && player.grace <= 0 && pointInCar(car, player.pos, 0.5)) {
+        knockPlayer(f2.clone(), car.speed);
+      }
+    }
+
     if (dist < 2.2) { car.ix = car.tx; car.iz = car.tz; setNextLeg(car); }
   }
+}
+
+// Player ragdoll while down after being hit by a car.
+function updatePlayerRagdoll(dt) {
+  player.flyVel.y -= 22 * dt;
+  player.pos.addScaledVector(player.flyVel, dt);
+  if (player.pos.y < 0) { player.pos.y = 0; player.flyVel.set(0, 0, 0); }
+  playerMesh.position.copy(player.pos);
+  playerMesh.visible = true;
+  if (player.pos.y > 0.02) {
+    playerMesh.rotation.x += dt * 7;
+    playerMesh.rotation.z += dt * 5;
+  } else {
+    playerMesh.rotation.set(Math.PI / 2, player.facing, 0); // lying down
+  }
+  player.downTimer -= dt;
+  if (player.downTimer <= 0) {
+    player.knocked = false;
+    player.grace = 1.2; // brief immunity so you don't get instantly re-hit
+    playerMesh.rotation.set(0, player.facing, 0);
+    resolveCircle(player.pos, player.radius);
+  }
+  updateCamera(dt, player.pos.clone().setY(1), player.facing, false);
 }
 
 function updatePickups(dt, t) {
@@ -991,8 +1061,12 @@ function frame(now) {
   }
 
   if (attackCooldown > 0) attackCooldown -= dt;
+  if (player.grace > 0) player.grace -= dt;
 
-  if (player.inCar) {
+  if (player.knocked) {
+    updatePlayerRagdoll(dt);
+    ui.speedo.hidden = true;
+  } else if (player.inCar) {
     updateCar(dt);
     document.querySelector('[data-btn="action"]').textContent = 'EXIT';
     document.querySelector('[data-btn="brake"]').textContent = 'BRAKE';
