@@ -1479,6 +1479,12 @@ const matrixGlyphs =
   '\u30a8\u30a7\u30b1\u30bb\u30c6\u30cd\u30d8\u30e1\u30ec\u30b2\u30bc\u30c7' +
   '\u30d9\u30da\u30aa\u30a9\u30b3\u30bd\u30c8\u30ce\u30db\u30e2\u30e8\u30e7' +
   '\u30ed\u30b4\u30be\u30c9\u30dc\u30dd\u30f4\u30c3\u30f30123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const RAIN_CAPTURE_MARGIN = 160;
+const RAIN_LONG_TEXT_NODE_THRESHOLD = 6000;
+const RAIN_STATIC_BLOCK_CHAR_LIMIT = 2400;
+const RAIN_STATIC_TOTAL_CHAR_LIMIT = 18000;
+const RAIN_MAX_STATIC_BLOCKS = 48;
+const RAIN_MAX_DIVIDER_DROPS = 180;
 
 function resizeMatrixCanvas() {
   const dpr = window.devicePixelRatio || 1;
@@ -1506,154 +1512,322 @@ function removeRainTextLayer() {
   }
 }
 
-function startMatrixRain() {
-  if (matrixCanvas.classList.contains('active')) return;
-  
-  // Cache the color once before starting the rain
-  cacheRainStyle();
-  
-  // Setup canvas dimensions
-  resizeMatrixCanvas();
-  
-  // Clone editor to measure exact subpixel coordinates of every character
-  const editorRect = editor.getBoundingClientRect();
-  const computedEditor = getComputedStyle(editor);
-  const fontSize = parseInt(computedEditor.fontSize, 10) || 18;
-  const editorClone = editor.cloneNode(true);
-  editorClone.style.position = 'fixed';
-  editorClone.style.top = `${editorRect.top}px`;
-  editorClone.style.left = `${editorRect.left}px`;
-  editorClone.style.width = `${editorRect.width}px`;
-  editorClone.style.height = `${editorRect.height}px`;
-  editorClone.style.padding = computedEditor.padding;
-  editorClone.style.margin = '0';
-  editorClone.style.boxSizing = computedEditor.boxSizing;
-  editorClone.style.overflow = 'hidden';
-  editorClone.style.opacity = '0'; 
-  editorClone.style.pointerEvents = 'none';
-  editorClone.style.zIndex = '-1';
-  document.body.appendChild(editorClone);
+function isRainRectVisible(rect, margin = RAIN_CAPTURE_MARGIN) {
+  return rect
+    && rect.width > 0
+    && rect.height > 0
+    && rect.bottom >= -margin
+    && rect.top <= window.innerHeight + margin
+    && rect.right >= -margin
+    && rect.left <= window.innerWidth + margin;
+}
 
-  // Deep wrap all non-whitespace characters in spans
-  function wrapTextNodes(node) {
-    if (node.nodeType === 3) { 
-      const chars = node.nodeValue.split('');
-      const fragment = document.createDocumentFragment();
-      chars.forEach(char => {
-        if (char.trim() === '') {
-          fragment.appendChild(document.createTextNode(char));
-        } else {
-          const span = document.createElement('span');
-          span.className = 'matrix-char';
-          span.textContent = char;
-          fragment.appendChild(span);
-        }
-      });
-      node.parentNode.replaceChild(fragment, node);
-    } else if (node.nodeType === 1) {
-      Array.from(node.childNodes).forEach(wrapTextNodes);
-    }
+function getRainTextStyle(element) {
+  const style = getComputedStyle(element);
+  return {
+    font: style.font,
+    fontSize: style.fontSize,
+    fontFamily: style.fontFamily,
+    lineHeight: style.lineHeight,
+    letterSpacing: style.letterSpacing,
+    color: style.color,
+    textShadow: style.textShadow
+  };
+}
+
+function getPixelLineHeight(style, fallbackFontSize) {
+  if (style.lineHeight.endsWith('px')) {
+    return parseFloat(style.lineHeight) || fallbackFontSize * 1.6;
   }
-  
-  wrapTextNodes(editorClone);
 
-  removeRainTextLayer();
-  rainTextLayer = document.createElement('div');
-  rainTextLayer.id = 'matrix-rain-text-layer';
-  rainTextLayer.style.position = 'fixed';
-  rainTextLayer.style.inset = '0';
-  rainTextLayer.style.zIndex = '2001';
-  rainTextLayer.style.pointerEvents = 'none';
-  rainTextLayer.style.contain = 'layout paint';
+  const numericLineHeight = parseFloat(style.lineHeight);
+  if (Number.isFinite(numericLineHeight)) {
+    return numericLineHeight * (parseFloat(style.fontSize) || fallbackFontSize);
+  }
 
-  const userDrops = [];
-  const dividerDrops = [];
-  
-  // Extract coordinates
-  const spans = editorClone.querySelectorAll('.matrix-char');
-  spans.forEach(span => {
-    const rect = span.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
+  return fallbackFontSize * 1.6;
+}
 
-    const spanStyle = getComputedStyle(span);
-    const fallingSpan = document.createElement('span');
-    fallingSpan.textContent = span.textContent;
-    fallingSpan.style.position = 'absolute';
-    fallingSpan.style.left = `${rect.left}px`;
-    fallingSpan.style.top = `${rect.top}px`;
-    fallingSpan.style.font = spanStyle.font;
-    fallingSpan.style.lineHeight = spanStyle.lineHeight;
-    fallingSpan.style.letterSpacing = spanStyle.letterSpacing;
-    fallingSpan.style.color = spanStyle.color;
-    fallingSpan.style.textShadow = spanStyle.textShadow;
-    fallingSpan.style.whiteSpace = 'pre';
-    fallingSpan.style.willChange = 'transform, opacity';
-    fallingSpan.style.transform = 'translate3d(0, 0, 0)';
-    rainTextLayer.appendChild(fallingSpan);
+function measureRainCharWidth(style, fallbackFontSize) {
+  matrixCtx.save();
+  matrixCtx.font = style.font || `${style.fontSize || `${fallbackFontSize}px`} ${style.fontFamily || 'monospace'}`;
+  const width = matrixCtx.measureText('M').width;
+  matrixCtx.restore();
+  return Math.max(4, width || fallbackFontSize * 0.6);
+}
 
-    userDrops.push({
-      el: fallingSpan,
-      char: span.textContent,
-      x: rect.left + (rect.width / 2),
-      top: rect.top,
-      yPos: 0,
-      falling: false,
-      velocity: 0,
-      maxSpeed: Math.random() * 5 + 8,
-      acceleration: Math.random() * 0.35 + 0.65,
-      delay: Math.random() * 80 + 10,
-      frames: 0
+function getRainDropBudget(fontSize) {
+  const approximateColumns = window.innerWidth / Math.max(10, fontSize * 0.72);
+  const approximateRows = window.innerHeight / Math.max(18, fontSize * 1.5);
+  return Math.min(1400, Math.max(650, Math.floor(approximateColumns * approximateRows * 0.28)));
+}
+
+function getVisibleRainBlocks() {
+  return Array.from(editor.children).filter((block) => {
+    const rect = block.getBoundingClientRect();
+    return isRainRectVisible(rect);
+  });
+}
+
+function getRainTextNodes(root) {
+  const nodes = [];
+  const walker = document.createTreeWalker(
+    root,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode(node) {
+        return node.nodeValue && node.nodeValue.trim()
+          ? NodeFilter.FILTER_ACCEPT
+          : NodeFilter.FILTER_REJECT;
+      }
+    }
+  );
+
+  let node = walker.nextNode();
+  while (node) {
+    nodes.push(node);
+    node = walker.nextNode();
+  }
+
+  return nodes;
+}
+
+function getRainTextWindow(textNode, blockRect, style, fallbackFontSize) {
+  const textLength = textNode.nodeValue.length;
+  const blockIsViewportSized = blockRect.height <= window.innerHeight + (RAIN_CAPTURE_MARGIN * 2);
+
+  if (textLength <= RAIN_LONG_TEXT_NODE_THRESHOLD && blockIsViewportSized) {
+    return { start: 0, end: textLength };
+  }
+
+  const lineHeight = getPixelLineHeight(style, fallbackFontSize);
+  const charWidth = measureRainCharWidth(style, fallbackFontSize);
+  const charsPerLine = Math.max(1, Math.floor(blockRect.width / charWidth));
+  const firstVisibleLine = Math.max(
+    0,
+    Math.floor((-RAIN_CAPTURE_MARGIN - blockRect.top) / lineHeight) - 5
+  );
+  const lastVisibleLine = Math.max(
+    firstVisibleLine,
+    Math.ceil((window.innerHeight + RAIN_CAPTURE_MARGIN - blockRect.top) / lineHeight) + 5
+  );
+
+  return {
+    start: Math.max(0, (firstVisibleLine * charsPerLine) - (charsPerLine * 3)),
+    end: Math.min(textLength, ((lastVisibleLine + 1) * charsPerLine) + (charsPerLine * 3))
+  };
+}
+
+function countRainCharacters(text, start, end) {
+  let count = 0;
+  for (let i = start; i < end; i++) {
+    if (text[i] && text[i].trim()) count++;
+  }
+  return count;
+}
+
+function collectRainTextInfos(visibleBlocks, fallbackFontSize) {
+  const infos = [];
+
+  visibleBlocks.forEach((block) => {
+    if (block.tagName.toLowerCase() === 'hr') return;
+
+    const blockRect = block.getBoundingClientRect();
+    if (!isRainRectVisible(blockRect)) return;
+
+    const style = getRainTextStyle(block);
+    const textNodes = getRainTextNodes(block);
+
+    textNodes.forEach((textNode) => {
+      const textWindow = getRainTextWindow(textNode, blockRect, style, fallbackFontSize);
+      if (textWindow.end <= textWindow.start) return;
+
+      const count = countRainCharacters(textNode.nodeValue, textWindow.start, textWindow.end);
+      if (!count) return;
+
+      infos.push({
+        textNode,
+        start: textWindow.start,
+        end: textWindow.end,
+        style,
+        count
+      });
     });
   });
 
-  const headerMarkers = editorClone.querySelectorAll('h1, h2');
-  headerMarkers.forEach((header) => {
+  return infos;
+}
+
+function getCharacterRainRect(textNode, offset, range) {
+  try {
+    range.setStart(textNode, offset);
+    range.setEnd(textNode, offset + 1);
+  } catch (error) {
+    return null;
+  }
+
+  const rects = Array.from(range.getClientRects());
+  return rects.find((rect) => isRainRectVisible(rect, 28)) || null;
+}
+
+function createRainDrop(char, rect, style, fontSize, xOverride = null) {
+  const fallingSpan = document.createElement('span');
+  fallingSpan.textContent = char;
+  fallingSpan.style.position = 'absolute';
+  fallingSpan.style.left = `${rect.left}px`;
+  fallingSpan.style.top = `${rect.top}px`;
+  fallingSpan.style.font = style.font;
+  fallingSpan.style.lineHeight = style.lineHeight;
+  fallingSpan.style.letterSpacing = style.letterSpacing;
+  fallingSpan.style.color = style.color;
+  fallingSpan.style.textShadow = style.textShadow;
+  fallingSpan.style.whiteSpace = 'pre';
+  fallingSpan.style.willChange = 'transform, opacity';
+  fallingSpan.style.transform = 'translate3d(0, 0, 0)';
+  rainTextLayer.appendChild(fallingSpan);
+
+  return {
+    el: fallingSpan,
+    char,
+    x: xOverride ?? rect.left + (rect.width / 2),
+    top: rect.top,
+    yPos: 0,
+    falling: false,
+    velocity: 0,
+    maxSpeed: Math.random() * 5 + 8,
+    acceleration: Math.random() * 0.35 + 0.65,
+    delay: Math.random() * 68 + 10 + Math.max(0, rect.top / window.innerHeight) * 34,
+    frames: 0
+  };
+}
+
+function addStaticRainBlocks(visibleBlocks) {
+  const staticLayer = document.createElement('div');
+  staticLayer.style.position = 'absolute';
+  staticLayer.style.inset = '0';
+  staticLayer.style.pointerEvents = 'none';
+  staticLayer.style.willChange = 'opacity';
+
+  let blockCount = 0;
+  let totalCharacters = 0;
+
+  visibleBlocks.forEach((block) => {
+    if (blockCount >= RAIN_MAX_STATIC_BLOCKS) return;
+    if (block.tagName.toLowerCase() === 'hr') return;
+
+    const text = block.textContent || '';
+    if (!text.trim()) return;
+    if (text.length > RAIN_STATIC_BLOCK_CHAR_LIMIT) return;
+    if (totalCharacters + text.length > RAIN_STATIC_TOTAL_CHAR_LIMIT) return;
+
+    const rect = block.getBoundingClientRect();
+    if (!isRainRectVisible(rect, 20)) return;
+
+    const tag = block.tagName.toLowerCase();
+    const marker = tag === 'h1' ? '# ' : tag === 'h2' ? '## ' : '';
+    const style = getRainTextStyle(block);
+    const staticBlock = document.createElement('div');
+    staticBlock.textContent = `${marker}${text}`;
+    staticBlock.style.position = 'absolute';
+    staticBlock.style.left = `${rect.left}px`;
+    staticBlock.style.top = `${rect.top}px`;
+    staticBlock.style.width = `${rect.width}px`;
+    staticBlock.style.minHeight = `${rect.height}px`;
+    staticBlock.style.overflow = 'hidden';
+    staticBlock.style.font = style.font;
+    staticBlock.style.lineHeight = style.lineHeight;
+    staticBlock.style.letterSpacing = style.letterSpacing;
+    staticBlock.style.color = style.color;
+    staticBlock.style.textShadow = style.textShadow;
+    staticBlock.style.whiteSpace = 'pre-wrap';
+    staticBlock.style.wordBreak = 'break-word';
+    staticBlock.style.margin = '0';
+    staticBlock.style.padding = '0';
+    staticBlock.style.boxSizing = 'border-box';
+    staticLayer.appendChild(staticBlock);
+
+    blockCount++;
+    totalCharacters += text.length;
+  });
+
+  if (!blockCount) return null;
+  rainTextLayer.appendChild(staticLayer);
+  return staticLayer;
+}
+
+function addRainTextDrops(textInfos, userDrops, fontSize, dropBudget) {
+  const totalCandidateCharacters = textInfos.reduce((total, info) => total + info.count, 0);
+  const sampleStep = Math.max(1, Math.ceil(totalCandidateCharacters / dropBudget));
+  const sampleOffset = sampleStep > 1 ? Math.floor(Math.random() * sampleStep) : 0;
+  const range = document.createRange();
+  let seenCharacters = 0;
+
+  try {
+    for (let infoIndex = 0; infoIndex < textInfos.length; infoIndex++) {
+      const info = textInfos[infoIndex];
+      const text = info.textNode.nodeValue;
+
+      for (let offset = info.start; offset < info.end; offset++) {
+        const char = text[offset];
+        if (!char || !char.trim()) continue;
+
+        const shouldSample = (seenCharacters % sampleStep) === sampleOffset;
+        seenCharacters++;
+        if (!shouldSample) continue;
+        if (userDrops.length >= dropBudget) return sampleStep;
+
+        const rect = getCharacterRainRect(info.textNode, offset, range);
+        if (!rect) continue;
+
+        userDrops.push(createRainDrop(char, rect, info.style, fontSize));
+      }
+    }
+  } finally {
+    if (typeof range.detach === 'function') range.detach();
+  }
+
+  return sampleStep;
+}
+
+function addRainHeaderMarkers(visibleBlocks, userDrops, fontSize) {
+  visibleBlocks.forEach((header) => {
+    const tag = header.tagName.toLowerCase();
+    if (tag !== 'h1' && tag !== 'h2') return;
+
     const rect = header.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
+    if (!isRainRectVisible(rect, 20)) return;
 
-    const headerStyle = getComputedStyle(header);
-    const markerText = header.tagName.toLowerCase() === 'h1' ? '# ' : '## ';
-    const markerSpan = document.createElement('span');
-    markerSpan.textContent = markerText;
-    markerSpan.style.position = 'absolute';
-    markerSpan.style.left = `${rect.left}px`;
-    markerSpan.style.top = `${rect.top}px`;
-    markerSpan.style.font = headerStyle.font;
-    markerSpan.style.lineHeight = headerStyle.lineHeight;
-    markerSpan.style.letterSpacing = headerStyle.letterSpacing;
-    markerSpan.style.color = `rgba(${cachedRainColor}, 0.55)`;
-    markerSpan.style.textShadow = 'none';
-    markerSpan.style.whiteSpace = 'pre';
-    markerSpan.style.willChange = 'transform, opacity';
-    markerSpan.style.transform = 'translate3d(0, 0, 0)';
-    rainTextLayer.appendChild(markerSpan);
+    const markerText = tag === 'h1' ? '# ' : '## ';
+    const markerStyle = getRainTextStyle(header);
+    markerStyle.color = `rgba(${cachedRainColor}, 0.55)`;
+    markerStyle.textShadow = 'none';
 
-    userDrops.push({
-      el: markerSpan,
-      char: markerText,
-      x: rect.left + (markerText.length * fontSize * 0.32),
-      top: rect.top,
-      yPos: 0,
-      falling: false,
-      velocity: 0,
-      maxSpeed: Math.random() * 5 + 8,
-      acceleration: Math.random() * 0.35 + 0.65,
-      delay: Math.random() * 80 + 10,
-      frames: 0
-    });
+    userDrops.push(createRainDrop(
+      markerText,
+      rect,
+      markerStyle,
+      fontSize,
+      rect.left + (markerText.length * fontSize * 0.32)
+    ));
   });
+}
 
-  const dividers = editorClone.querySelectorAll('hr');
-  dividers.forEach((divider) => {
+function addRainDividerDrops(visibleBlocks, dividerDrops, fontSize) {
+  visibleBlocks.forEach((divider) => {
+    if (divider.tagName.toLowerCase() !== 'hr') return;
+    if (dividerDrops.length >= RAIN_MAX_DIVIDER_DROPS) return;
+
     const rect = divider.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
+    if (!isRainRectVisible(rect, 20)) return;
 
     const segmentWidth = Math.max(5, Math.min(10, fontSize * 0.48));
     const segmentGap = 2;
-    const segmentCount = Math.max(1, Math.floor(rect.width / (segmentWidth + segmentGap)));
+    const rawSegmentCount = Math.max(1, Math.floor(rect.width / (segmentWidth + segmentGap)));
+    const remainingBudget = Math.max(1, RAIN_MAX_DIVIDER_DROPS - dividerDrops.length);
+    const segmentStep = Math.max(1, Math.ceil(rawSegmentCount / remainingBudget));
 
-    for (let i = 0; i < segmentCount; i++) {
-      const progress = segmentCount <= 1 ? 0 : i / (segmentCount - 1);
+    for (let i = 0; i < rawSegmentCount && dividerDrops.length < RAIN_MAX_DIVIDER_DROPS; i += segmentStep) {
+      const progress = rawSegmentCount <= 1 ? 0 : i / (rawSegmentCount - 1);
       const alpha = Math.max(0.05, 0.86 * (1 - progress));
       const fragment = document.createElement('span');
       fragment.style.position = 'absolute';
@@ -1684,9 +1858,39 @@ function startMatrixRain() {
       });
     }
   });
+}
+
+function startMatrixRain() {
+  if (matrixCanvas.classList.contains('active')) return;
+
+  cacheRainStyle();
+  resizeMatrixCanvas();
+
+  const computedEditor = getComputedStyle(editor);
+  const fontSize = parseInt(computedEditor.fontSize, 10) || 18;
+  const visibleBlocks = getVisibleRainBlocks();
+  const textInfos = collectRainTextInfos(visibleBlocks, fontSize);
+  const dropBudget = getRainDropBudget(fontSize);
+  const sampledText = textInfos.reduce((total, info) => total + info.count, 0) > dropBudget;
+
+  removeRainTextLayer();
+  rainTextLayer = document.createElement('div');
+  rainTextLayer.id = 'matrix-rain-text-layer';
+  rainTextLayer.style.position = 'fixed';
+  rainTextLayer.style.inset = '0';
+  rainTextLayer.style.zIndex = '2001';
+  rainTextLayer.style.pointerEvents = 'none';
+  rainTextLayer.style.contain = 'layout paint';
+
+  const rainStaticLayer = sampledText ? addStaticRainBlocks(visibleBlocks) : null;
+  const userDrops = [];
+  const dividerDrops = [];
+
+  addRainTextDrops(textInfos, userDrops, fontSize, dropBudget);
+  addRainHeaderMarkers(visibleBlocks, userDrops, fontSize);
+  addRainDividerDrops(visibleBlocks, dividerDrops, fontSize);
 
   document.body.appendChild(rainTextLayer);
-  document.body.removeChild(editorClone);
 
   matrixCanvas.classList.add('active');
 
@@ -1722,6 +1926,14 @@ function startMatrixRain() {
     matrixCtx.textBaseline = 'top'; // Matches getBoundingClientRect top
     
     rainTimer++;
+
+    if (rainStaticLayer && rainStaticLayer.parentNode) {
+      const staticOpacity = rainTimer < 18 ? 1 : Math.max(0, 1 - ((rainTimer - 18) / 32));
+      rainStaticLayer.style.opacity = String(staticOpacity);
+      if (staticOpacity <= 0) {
+        rainStaticLayer.remove();
+      }
+    }
     
     // 1. Process user text drops in DOM so the handoff is pixel-stable.
     for (let i = 0; i < userDrops.length; i++) {
