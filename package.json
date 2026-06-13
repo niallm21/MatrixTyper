@@ -1,0 +1,19 @@
+{
+  "name": "matrixtyper-tauri",
+  "version": "1.0.0",
+  "description": "A lightweight, distraction-free Matrix-style writing app built with Tauri.",
+  "main": "index.js",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "test": "cargo check --manifest-path src-tauri/Cargo.toml && node --check src/editor.js"
+  },
+  "keywords": [],
+  "author": "Niall",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/cli": "^2.11.2"
+  }
+}

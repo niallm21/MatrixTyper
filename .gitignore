@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Tauri / Rust build output
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Local build artifacts and installers
+*.exe
+*.msi
+*.msix
+*.dmg
+*.app
+*.AppImage
+*.deb
+*.rpm
+
+# Local archives and source backups
+*.7z
+*.zip
+SOURCE/
+
+# Logs and local noise
+*.log
+.DS_Store
+Thumbs.db
