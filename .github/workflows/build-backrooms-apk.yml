@@ -1,0 +1,88 @@
+name: Build Backrooms APK
+
+on:
+  push:
+    branches:
+      - claude/backrooms-game-procedural-lv20nr
+    paths:
+      - 'backrooms/**'
+      - '.github/workflows/build-backrooms-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: backrooms-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backrooms
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web bundle
+        run: npm run build
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      - name: Build debug APK
+        working-directory: backrooms/android
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Stage APK
+        run: |
+          mkdir -p ../artifacts
+          cp android/app/build/outputs/apk/debug/app-debug.apk \
+             ../artifacts/backrooms-escape-debug.apk
+          ls -la ../artifacts
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backrooms-escape-apk
+          path: artifacts/backrooms-escape-debug.apk
+          if-no-files-found: error
+
+      - name: Publish APK to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: backrooms-apk-${{ github.run_number }}
+          name: Backrooms Escape APK (build ${{ github.run_number }})
+          body: |
+            Procedurally generated Backrooms game — debug APK.
+            Built from `${{ github.sha }}`.
+            Install on Android (allow "install from unknown sources").
+          files: artifacts/backrooms-escape-debug.apk
+          fail_on_unmatched_files: true
+          make_latest: true

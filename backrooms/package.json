@@ -1,0 +1,23 @@
+{
+  "name": "backrooms-escape",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Backrooms Escape - a procedurally generated atmospheric survival/exploration game.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --host",
+    "cap:add": "cap add android",
+    "cap:sync": "cap sync android"
+  },
+  "dependencies": {
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/cli": "^6.1.2",
+    "@capacitor/core": "^6.1.2",
+    "vite": "^5.4.10"
+  }
+}
