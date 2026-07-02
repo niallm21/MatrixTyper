@@ -248,6 +248,20 @@ Full honesty: **you cannot make this perfectly un-gameable, and you shouldn't pr
 that.** What you can do is make cheating more expensive than being genuine, and make the
 rating signal robust enough that cheaters don't reach super-buddy status. Layers:
 
+### Layer 0 — Make the check-in itself honest (photo proof)
+
+- **Live capture only**: the proof camera is in-app with no gallery or upload
+  path — yesterday's photo can't become today's proof. Watermark (date · time ·
+  goal · LIVE) is burned into the pixels at capture.
+- **The buddy is the verifier.** Software can't judge whether a blurry gym photo
+  is "real"; the partner who sees your proof every day can. Daily photos to one
+  specific invested human make lying socially expensive in a way no classifier
+  matches. Verification is a *relationship feature*, not an AI feature.
+- Later hardening: device attestation (Play Integrity), liveness burst-capture,
+  capture-time sensor consistency. Honest position: cheating can be made
+  expensive and weird, never impossible — the design goal is that honesty is
+  always the cheaper path.
+
 ### Layer 1 — Make ratings hard to farm
 - **Time-gated ratings**: a rating only counts toward super-buddy qualification if the
   pairing lasted ≥ 14 days with ≥ 10 mutual check-ins. Rating rings now cost weeks of

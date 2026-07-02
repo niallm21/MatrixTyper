@@ -174,6 +174,7 @@
       <label class="field"><span>Why this goal matters (shown when your page is still open at night)</span>
         <input id="set-why" type="text" maxlength="140" placeholder="your reason, in your words"></label>
       <label class="toggle-row"><span>Morning reminder</span><input id="set-reminder" type="checkbox" checked></label>
+      <label class="toggle-row"><span>Always require photo proof</span><input id="set-proof" type="checkbox"></label>
       <label class="toggle-row"><span>Sounds</span><input id="set-sound" type="checkbox" checked></label>
       <label class="toggle-row"><span>Haptics</span><input id="set-haptics" type="checkbox" checked></label>
       <button class="btn primary" id="btn-save-settings">save</button>
@@ -204,6 +205,27 @@
       <p class="hint small">Copied to clipboard — paste it to the maker. (Or long-press the text below.)</p>
       <textarea id="report-text" class="report-text" readonly></textarea>
       <button class="btn primary" id="report-close">done</button>
+    </div>
+  </div>
+
+  <!-- ══════════ PROOF CAMERA ══════════ -->
+  <div id="proof-ask" class="celebrate" hidden>
+    <div class="celebrate-card page-card">
+      <h2 class="script lg">stamp it with proof?</h2>
+      <p class="hint">A live photo goes on your polaroid — camera only,
+         no gallery, so it can't be faked. Sunny sees it too.</p>
+      <button class="btn primary" id="proof-yes">📸 snap the proof</button>
+      <button class="btn" id="proof-skip">just the stamp today</button>
+    </div>
+  </div>
+
+  <div id="camera" class="camera" hidden>
+    <video id="cam-video" autoplay playsinline muted></video>
+    <canvas id="cam-canvas" hidden></canvas>
+    <div class="cam-bar">
+      <button class="btn" id="cam-cancel">cancel</button>
+      <button class="cam-shutter" id="cam-shutter" aria-label="take photo"></button>
+      <span class="cam-live script">● live</span>
     </div>
   </div>
 

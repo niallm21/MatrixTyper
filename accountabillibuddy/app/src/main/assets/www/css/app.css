@@ -400,6 +400,22 @@ body {
   padding:10px; color:var(--ink); white-space:pre; overflow:auto; resize:none;
 }
 
+/* ── proof camera ───────────────────────────── */
+.camera { position:fixed; inset:0; z-index:60; background:#181410;
+  display:flex; flex-direction:column; }
+.camera video { flex:1; width:100%; object-fit:cover; }
+.cam-bar { display:flex; align-items:center; justify-content:space-between;
+  padding:16px 22px calc(18px + env(safe-area-inset-bottom)); background:#181410; }
+.cam-bar .btn { width:auto; margin:0; background:#3B3226; color:#FFF9EA; }
+.cam-shutter { width:64px; height:64px; border-radius:50%; border:5px solid #FFF9EA;
+  background:var(--terracotta); }
+.cam-shutter:active { transform:scale(.92); }
+.cam-live { color:#FF8A7A; font-size:1.2rem; }
+.photo-area img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+.photo-area .stamp.on-photo { position:absolute; right:4%; bottom:4%; width:46%;
+  background:rgba(255,253,246,.25); backdrop-filter:blur(1px); }
+.mini.photo { background-size:cover; background-position:center; border-color:var(--marigold); }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration:.01ms !important; transition-duration:.01ms !important; }
 }

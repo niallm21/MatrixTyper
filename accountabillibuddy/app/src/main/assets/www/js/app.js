@@ -8,7 +8,7 @@
 
 const STORE_KEY = 'abb.state.v1';
 const LOG_KEY = 'abb.log.v1';
-const APP_VERSION = '0.4.0';
+const APP_VERSION = '0.5.0';
 const MILESTONES = [3, 7, 14, 30, 60, 100];
 const $ = (sel) => document.querySelector(sel);
 
@@ -106,6 +106,7 @@ function migrate(s) {
   s.celebrated = s.celebrated || [];
   s.why = s.why || '';                     // the promise note
   if (s.reminder === undefined) s.reminder = true;
+  if (s.proofRequired === undefined) s.proofRequired = false;
   return s;
 }
 /* tell the Android shell to schedule (or clear) the daily notification */
@@ -120,7 +121,17 @@ function syncReminder() {
     }
   } catch { /* bridge unavailable (browser preview) */ }
 }
-function save() { localStorage.setItem(STORE_KEY, JSON.stringify(S)); }
+function save() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); }
+  catch {
+    /* quota — shed oldest photos until it fits */
+    const keys = Object.keys(S.days).filter((k) => S.days[k].photo).sort();
+    while (keys.length) {
+      delete S.days[keys.shift()].photo;
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); return; } catch { /* next */ }
+    }
+  }
+}
 function freshState(name, goal, cat, time) {
   return migrate({
     name, goal, cat, time,
@@ -453,7 +464,11 @@ function renderHome(animateBuddy = false) {
   /* you */
   const youPhoto = $('#you-photo');
   if (day.you) {
-    youPhoto.innerHTML = stampHTML(day.you, { late: day.youLate, early: day.youEarly }) +
+    const stampCls = day.photo ? ' on-photo' : '';
+    youPhoto.innerHTML =
+      (day.photo ? `<img src="${day.photo}" alt="today's proof">` : '') +
+      stampHTML(day.you, { late: day.youLate, early: day.youEarly })
+        .replace('class="stamp', 'class="stamp' + stampCls) +
       (youFirst ? '<span class="crown">👑</span>' : '') +
       (day.react ? `<span class="react-doodle">${day.react}</span>` : '');
     $('#checkin-zone').classList.add('done');
@@ -646,9 +661,86 @@ $('#btn-checkin').addEventListener('click', () => {
   renderHome();
   const stamp = $('#you-photo .stamp');
   if (stamp) { stamp.classList.add('animate'); dustPuff($('#you-photo')); }
-  /* anticipation gap, then the reveal — the pause IS the dopamine */
-  setTimeout(() => openReveal(sticker, 'a sticker fell out of today\'s page…'), 900);
+  /* proof first, then the anticipation gap and the reveal */
+  setTimeout(() => proofFlow(sticker), 700);
 });
+
+/* ── live photo proof ──────────────────────────
+   Camera only, live only: there is deliberately no
+   gallery path, so yesterday's photo can't become
+   today's proof. The watermark is burned in at
+   capture. The real verifier is the buddy who sees
+   it every day. */
+let camStream = null, afterProof = null;
+function proofFlow(sticker) {
+  afterProof = () => setTimeout(() =>
+    openReveal(sticker, 'a sticker fell out of today\'s page…'), 400);
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    afterProof(); afterProof = null; return;   // no camera (browser preview)
+  }
+  if (S.proofRequired) { startCamera(); return; }
+  $('#proof-ask').hidden = false;
+}
+$('#proof-yes').addEventListener('click', () => {
+  $('#proof-ask').hidden = true; startCamera();
+});
+$('#proof-skip').addEventListener('click', () => {
+  $('#proof-ask').hidden = true;
+  track('proof_skipped');
+  if (afterProof) { afterProof(); afterProof = null; }
+});
+function startCamera() {
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
+    .then((stream) => {
+      camStream = stream;
+      $('#cam-video').srcObject = stream;
+      $('#camera').hidden = false;
+      track('camera_open');
+    })
+    .catch(() => {
+      track('camera_denied');
+      if (afterProof) { afterProof(); afterProof = null; }
+    });
+}
+function stopCamera() {
+  if (camStream) { camStream.getTracks().forEach((t) => t.stop()); camStream = null; }
+  $('#camera').hidden = true;
+}
+$('#cam-cancel').addEventListener('click', () => {
+  stopCamera(); track('proof_cancelled');
+  if (afterProof) { afterProof(); afterProof = null; }
+});
+$('#cam-shutter').addEventListener('click', () => {
+  const video = $('#cam-video');
+  if (!video.videoWidth) return;
+  const W = 480, H = Math.round(480 * video.videoHeight / video.videoWidth);
+  const c = $('#cam-canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  g.drawImage(video, 0, 0, W, H);
+  /* burn the watermark in at capture — date · time · goal · LIVE */
+  const bar = 30;
+  g.fillStyle = 'rgba(24,20,16,.55)'; g.fillRect(0, H - bar, W, bar);
+  g.fillStyle = '#FFF6E0'; g.font = '600 13px sans-serif';
+  const now = new Date();
+  g.fillText(
+    now.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' · ' +
+    now.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) + ' · ' +
+    S.goal.slice(0, 30) + ' · ● LIVE', 8, H - 10);
+  const day = (S.days[todayKey()] = S.days[todayKey()] || {});
+  day.photo = c.toDataURL('image/jpeg', 0.62);
+  day.photoAt = now.getTime();
+  prunePhotos(); save();
+  stopCamera();
+  thunk(); buzz(25);
+  track('proof_taken');
+  renderHome();
+  if (afterProof) { afterProof(); afterProof = null; }
+});
+/* photos are the heavy part of storage — keep the freshest 30 */
+function prunePhotos() {
+  const keys = Object.keys(S.days).filter((k) => S.days[k].photo).sort();
+  while (keys.length > 30) delete S.days[keys.shift()].photo;
+}
 
 $('#you-note').addEventListener('change', () => {
   const day = (S.days[todayKey()] = S.days[todayKey()] || {});
@@ -828,6 +920,7 @@ function renderJournal() {
       `<div class="mini ${youCls}">${youMark}</div>` +
       `<div class="mini buddy ${day.buddy ? 'on' : ''}">${day.buddy ? '✓' : '·'}</div>` +
       `${sk ? `<div class="mini" title="${sk.name}">${sk.emoji}</div>` : ''}` +
+      `${day.photo ? `<div class="mini photo" style="background-image:url(${day.photo})"></div>` : ''}` +
       `</div>` +
       `<div class="jd-note">${day.youNote ? '“' + escapeHTML(day.youNote) + '”' : ''}</div>`;
     list.appendChild(el);
@@ -843,6 +936,7 @@ function renderSettings() {
   $('#set-name').value = S.name; $('#set-goal').value = S.goal;
   $('#set-time').value = S.time; $('#set-why').value = S.why;
   $('#set-reminder').checked = S.reminder;
+  $('#set-proof').checked = S.proofRequired;
   $('#set-sound').checked = S.sound; $('#set-haptics').checked = S.haptics;
   $('#fb-count').textContent =
     `${LOG.events.length} moments captured · ${LOG.notes.length} notes jotted`;
@@ -853,6 +947,7 @@ $('#btn-save-settings').addEventListener('click', () => {
   S.time = $('#set-time').value || S.time;
   S.why = $('#set-why').value.trim();
   S.reminder = $('#set-reminder').checked;
+  S.proofRequired = $('#set-proof').checked;
   S.sound = $('#set-sound').checked; S.haptics = $('#set-haptics').checked;
   save(); syncReminder(); buzz(15); show('home');
 });
