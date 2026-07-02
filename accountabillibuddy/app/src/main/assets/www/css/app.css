@@ -354,6 +354,42 @@ body {
 .quest.done .qbar i { background:var(--marigold); }
 .golden-week { text-align:center; font-size:1.35rem; color:#B07C1A; margin-top:8px; }
 
+/* ── mend ritual ────────────────────────────── */
+.day-dot.mend .dot { border:2px solid var(--rose); background:#FBF0F1; }
+.repair-line { text-align:center; margin-top:14px; }
+.repair-line .script { font-size:1.3rem; color:#B0666F; }
+.repair-bar { height:8px; width:70%; margin:6px auto 0; background:#F1E6C8;
+  border-radius:99px; overflow:hidden; }
+.repair-bar i { display:block; height:100%; background:var(--rose); border-radius:99px;
+  transition:width .6s; }
+
+/* ── buddy gift ─────────────────────────────── */
+.gift-tag {
+  position:absolute; top:-10px; left:-8px; font-size:1.6rem; z-index:2;
+  background:none; border:none; padding:4px; cursor:pointer;
+  filter:drop-shadow(0 2px 3px rgba(90,70,40,.35));
+  animation:wiggle 1.4s ease-in-out infinite;
+}
+
+/* ── why / promise card ─────────────────────── */
+.why-card { margin-top:20px; padding:18px 18px 16px; transform:rotate(-.3deg);
+  border:1.5px dashed #DECFA8; box-shadow:none; background:#FDF8E8; text-align:center; }
+.why-lead { font-size:1.45rem; color:var(--ink-soft); }
+.why-quote { display:block; margin-top:4px; font-size:1.2rem; color:var(--ink-soft); }
+
+/* ── journal month spreads ──────────────────── */
+.month-card {
+  position:relative; background:linear-gradient(135deg,#FFFDF6,#FBF2DA);
+  border-radius:6px; box-shadow:var(--shadow); padding:16px 18px 12px;
+  margin:22px 4px 14px; transform:rotate(-.6deg);
+}
+.month-card .washi { width:66px; height:20px; top:-8px; }
+.month-name { font-size:1.8rem; }
+.month-stats { display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
+.mstat { font-size:.72rem; font-weight:800; color:var(--ink-soft);
+  background:#FFFDF6; border-radius:999px; padding:3px 10px;
+  box-shadow:0 1px 2px rgba(90,70,40,.12); }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration:.01ms !important; transition-duration:.01ms !important; }
 }

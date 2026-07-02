@@ -1,4 +1,4 @@
-# Accountabillibuddy — Game & Reward Design (v0.2)
+# Accountabillibuddy — Game & Reward Design (v0.2–v0.3)
 
 The reward stack, what psychological lever each piece pulls, and the rules that
 keep it pointed at the user's goal instead of at screen time.
@@ -27,6 +27,17 @@ goals" and "addicted to an app.")
 | **Evening tension state** | Loss aversion, applied gently | After 6pm unstamped: "today's page is still open… 🔥 6 on the line" + softly pulsing badge. States a fact the user cares about; never guilt, never shame. |
 | **Buddy reaction** | Social reward, variably timed | A minute or three after you stamp, Sunny reacts (❤️ on your polaroid + chime). Variable timing makes it a second, unpredictable hit — and it models what real buddies will do. |
 | **Streak freezes & repair** | Neutralizes the what-the-hell effect | Unchanged from v0.1: earn 1 per 7 days (cap 3), auto-consumed. The single most important anti-churn mechanic. |
+
+## Added in v0.3
+
+| Mechanic | Lever | Detail |
+|---|---|---|
+| **Daily notification** (native) | External trigger — the missing half of the habit loop | Fires at the user's chosen time; copy invokes the buddy ("Sunny already stamped today 🌻"), never guilt. Survives reboots; toggleable in settings. |
+| **The mend ritual** | Redemption arc vs. the what-the-hell effect | One missed day (freezes exhausted) isn't death: stamp the next 3 days in a row and the tear is stitched shut — streak restored, 🪡 mark in the strip and journal. "Broken-and-repaired is a better story than never-broken." Two-day gaps still break for real: mending must cost something. |
+| **Sunny's weekly gift** | Reciprocity + variable social reward | One deterministic day per week, a 🎁 waits on the buddy's polaroid; claiming runs the reveal flow with an uncommon/rare sticker. Models what real buddies will do for each other later. |
+| **The promise note** | Self-persuasion + implementation intention deepening | "Why does this goal matter?" — asked after the second stamp (not during onboarding, when motivation talk is cheap). Their own words are replayed in the evening tension state: "you wrote: …". People don't argue with themselves. |
+| **Monthly spreads** | Chunking + endowment | The journal groups into month album cards with stamp/together/sticker counts. A finished month is a *possession*. |
+| **Unlockable washi palette** | Cosmetic progression, no economy | Best-ever streak of 7 unlocks two tape colors, 30 unlocks two more; each day's page is taped in colors drawn from the unlocked palette. Progress you can see without a number. |
 
 ## Tuning notes
 

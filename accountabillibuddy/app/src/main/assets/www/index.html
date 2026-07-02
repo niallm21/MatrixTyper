@@ -139,6 +139,14 @@
       <div id="quest-list"></div>
     </div>
 
+    <div class="why-card page-card" id="why-card" hidden>
+      <span class="script why-lead">why does this goal matter to you?</span>
+      <label class="field note-field">
+        <input id="why-input" type="text" maxlength="140" placeholder="write it on the cover — future you will read it">
+      </label>
+      <button class="btn primary" id="why-save">keep it</button>
+    </div>
+
     <div class="freeze-line" id="freeze-line"></div>
   </section>
 
@@ -163,6 +171,9 @@
       <label class="field"><span>Name</span><input id="set-name" type="text" maxlength="20"></label>
       <label class="field"><span>Goal</span><input id="set-goal" type="text" maxlength="60"></label>
       <label class="field"><span>Check-in time</span><input id="set-time" type="time"></label>
+      <label class="field"><span>Why this goal matters (shown when your page is still open at night)</span>
+        <input id="set-why" type="text" maxlength="140" placeholder="your reason, in your words"></label>
+      <label class="toggle-row"><span>Morning reminder</span><input id="set-reminder" type="checkbox" checked></label>
       <label class="toggle-row"><span>Sounds</span><input id="set-sound" type="checkbox" checked></label>
       <label class="toggle-row"><span>Haptics</span><input id="set-haptics" type="checkbox" checked></label>
       <button class="btn primary" id="btn-save-settings">save</button>

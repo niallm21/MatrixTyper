@@ -78,7 +78,21 @@ function migrate(s) {
   s.pity = s.pity || 0;                    // check-ins since last rare+
   s.questRewards = s.questRewards || {};   // weekKey -> true
   s.celebrated = s.celebrated || [];
+  s.why = s.why || '';                     // the promise note
+  if (s.reminder === undefined) s.reminder = true;
   return s;
+}
+/* tell the Android shell to schedule (or clear) the daily notification */
+function syncReminder() {
+  if (!window.ABBNative) return;
+  try {
+    if (S.reminder) {
+      const [h, m] = S.time.split(':').map(Number);
+      window.ABBNative.setReminder(h, m);
+    } else {
+      window.ABBNative.clearReminder();
+    }
+  } catch { /* bridge unavailable (browser preview) */ }
 }
 function save() { localStorage.setItem(STORE_KEY, JSON.stringify(S)); }
 function freshState(name, goal, cat, time) {
@@ -149,6 +163,14 @@ function buddyCheckinDate(key) {
 }
 function buddyNoteFor(key) { return BUDDY_NOTES[hashStr(key) % BUDDY_NOTES.length]; }
 
+/* once a week (deterministic day), Sunny leaves a gift sticker on the page */
+function giftFor(key) {
+  const d = new Date(key + 'T12:00');
+  const giftDow = hashStr(weekKey(d) + 'giftday') % 7;
+  if (d.getDay() !== giftDow) return null;
+  const pool = STICKERS.filter((s) => s.rarity === 'uncommon' || s.rarity === 'rare');
+  return pool[hashStr(key + 'gift') % pool.length].id;
+}
 function syncBuddy() {
   const start = new Date(S.createdAt + 'T12:00');
   for (let d = start; dateKey(d) <= todayKey(); d = addDays(d, 1)) {
@@ -157,6 +179,7 @@ function syncBuddy() {
     if (!day.buddy && new Date() >= buddyCheckinDate(key)) {
       day.buddy = buddyCheckinDate(key).getTime();
       day.buddyNote = buddyNoteFor(key);
+      day.gift = giftFor(key);
       if (key === todayKey() && document.body.dataset.ready) { renderHome(true); chime(); }
     }
     /* Sunny reacts to your stamp a couple of minutes later */
@@ -172,26 +195,62 @@ function syncBuddy() {
   save();
 }
 
-/* ── streaks & freezes ─────────────────────── */
+/* ── streaks, freezes & the mend ritual ────── */
+/* A single missed day (with no freeze left) can be MENDED: stamp the next
+   3 days in a row and the tear is stitched — the streak survives. */
+function mendedDays() {
+  const out = {};
+  const start = new Date(S.createdAt + 'T12:00');
+  for (let d = start; dateKey(d) < todayKey(); d = addDays(d, 1)) {
+    const key = dateKey(d);
+    if ((S.days[key] || {}).you) continue;
+    let ok = true;
+    for (let i = 1; i <= 3; i++) {
+      const k = dateKey(addDays(d, i));
+      if (k > todayKey() || !(S.days[k] || {}).you) { ok = false; break; }
+    }
+    if (ok) out[key] = true;
+  }
+  return out;
+}
 function computeStreaks() {
   const start = new Date(S.createdAt + 'T12:00');
-  let pair = 0, you = 0, freezes = 0, earnedRun = 0, totalStamps = 0;
+  const mended = mendedDays();
+  let pair = 0, you = 0, freezes = 0, earnedRun = 0, totalStamps = 0, maxPair = 0;
   const frozen = {};
+  let lastBreak = null;                      // {key, pairBefore} of most recent tear
   for (let d = start; dateKey(d) <= todayKey(); d = addDays(d, 1)) {
     const key = dateKey(d), day = S.days[key] || {}, isToday = key === todayKey();
     if (day.you) {
       you++; earnedRun++; totalStamps++;
       if (earnedRun % 7 === 0 && freezes < 3) freezes++;
       pair = day.buddy ? pair + 1 : pair;
+      maxPair = Math.max(maxPair, pair);
     } else if (isToday) {
       /* today isn't a miss yet */
     } else if (freezes > 0) {
       freezes--; frozen[key] = true; earnedRun = 0;
+    } else if (mended[key]) {
+      earnedRun = 0;                         // stitched: streak survives, run resets
     } else {
+      lastBreak = { key, pairBefore: pair };
       pair = 0; you = 0; earnedRun = 0;
     }
   }
-  return { pair, you, freezes, frozen, totalStamps };
+  /* repair in progress? only the most recent tear, only a 1-day gap,
+     only while the 3 mending days are still being collected */
+  let repair = null;
+  if (lastBreak && lastBreak.pairBefore >= 2) {
+    let done = 0, clean = true;
+    for (let i = 1; i <= 3; i++) {
+      const k = dateKey(addDays(new Date(lastBreak.key + 'T12:00'), i));
+      if (k > todayKey()) break;
+      if ((S.days[k] || {}).you) done++;
+      else if (k < todayKey()) { clean = false; break; }
+    }
+    if (clean && done < 3) repair = { done, needed: 3, prev: lastBreak.pairBefore };
+  }
+  return { pair, you, freezes, frozen, totalStamps, maxPair, mended, repair };
 }
 function titleFor(totalStamps) {
   const t = TITLES.find(([n]) => totalStamps >= n);
@@ -332,7 +391,7 @@ $('[data-finish]').addEventListener('click', () => {
     obCat, $('#ob-time').value || '07:30');
   save(); obShow(3);
 });
-$('[data-start]').addEventListener('click', () => { syncBuddy(); show('home'); });
+$('[data-start]').addEventListener('click', () => { syncBuddy(); syncReminder(); show('home'); });
 
 /* ── home ──────────────────────────────────── */
 function stampHTML(ts, opts = {}) {
@@ -387,34 +446,70 @@ function renderHome(animateBuddy = false) {
       (buddyFirst ? '<span class="crown">👑</span>' : '');
     $('#buddy-note').hidden = false;
     $('#buddy-note-text').textContent = '🌻 ' + (day.buddyNote || '');
+    /* unclaimed gift waits on Sunny's polaroid */
+    if (day.gift && !day.giftClaimed) {
+      const g = document.createElement('button');
+      g.className = 'gift-tag'; g.textContent = '🎁'; g.id = 'gift-tag';
+      g.setAttribute('aria-label', 'open Sunny\'s gift');
+      bp.appendChild(g);
+      g.addEventListener('click', () => {
+        openReveal(BY_ID[day.gift], 'Sunny left this on your page…', 'gift');
+        buzz(15);
+      });
+    }
   } else {
     bp.innerHTML = '<div class="empty-hint script">Sunny hasn\'t<br>stamped yet</div>';
     $('#buddy-note').hidden = true;
   }
 
-  /* today's sticker on the page */
+  /* today's stickers on the page */
   const layer = $('#sticker-layer'); layer.innerHTML = '';
-  if (day.sticker) {
-    const s = BY_ID[day.sticker.id];
-    if (s) {
-      const el = document.createElement('div');
-      el.className = 'sticker-frame ' + s.rarity;
-      el.style.left = day.sticker.x + '%'; el.style.top = day.sticker.y + '%';
-      el.style.transform = `rotate(${day.sticker.rot}deg)`;
-      el.textContent = s.emoji;
-      layer.appendChild(el);
-    }
-  }
+  [day.sticker, day.giftSticker].filter(Boolean).forEach((placed) => {
+    const s = BY_ID[placed.id];
+    if (!s) return;
+    const el = document.createElement('div');
+    el.className = 'sticker-frame ' + s.rarity;
+    el.style.left = placed.x + '%'; el.style.top = placed.y + '%';
+    el.style.transform = `rotate(${placed.rot}deg)`;
+    el.textContent = s.emoji;
+    layer.appendChild(el);
+  });
 
-  /* evening tension: the streak is on the line */
+  /* daily washi tape — palette grows with your best-ever streak */
+  const washiColors = ['#D9A0A8', '#A8BFA0', '#92A8C4'];
+  if (st.maxPair >= 7) washiColors.push('#C97B5D', '#E8A83C');
+  if (st.maxPair >= 30) washiColors.push('#B9A8D0', '#E8938C');
+  const washis = document.querySelectorAll('#today-page .washi');
+  washis.forEach((w, i) => {
+    w.style.background = washiColors[(hashStr(key) + i * 3) % washiColors.length];
+  });
+
+  /* evening tension: the streak is on the line — and your own words */
   const tension = !day.you && new Date().getHours() >= 18;
   $('#tension-line').hidden = !tension;
   if (tension) {
-    $('#tension-line').textContent = st.pair > 0
+    const line = st.pair > 0
       ? `today's page is still open… 🔥 ${st.pair} on the line`
       : 'today\'s page is still open…';
+    $('#tension-line').innerHTML = escapeHTML(line) +
+      (S.why ? `<span class="why-quote">you wrote: “${escapeHTML(S.why)}”</span>` : '');
   }
   badge.classList.toggle('tension', tension && st.pair > 0);
+
+  /* mend ritual progress */
+  const oldRepair = $('#repair-line'); if (oldRepair) oldRepair.remove();
+  if (st.repair) {
+    const r = document.createElement('div');
+    r.className = 'repair-line'; r.id = 'repair-line';
+    r.innerHTML =
+      `<span class="script">🪡 mend the tear: stamp ${st.repair.needed} days in a row ` +
+      `and your ${st.repair.prev}-day streak lives on</span>` +
+      `<div class="repair-bar"><i style="width:${(st.repair.done / st.repair.needed) * 100}%"></i></div>`;
+    $('#today-page').after(r);
+  }
+
+  /* promise-note prompt (once, after the first few days) */
+  $('#why-card').hidden = !!S.why || st.totalStamps < 2;
 
   renderWeekStrip(st);
   renderSeals(st);
@@ -433,8 +528,9 @@ function renderWeekStrip(st) {
     el.className = 'day-dot';
     let mark = '';
     if (day.you && day.buddy) { el.classList.add('both'); mark = '★'; }
-    else if (day.you || day.buddy) { el.classList.add('half'); mark = '✓'; }
     else if (st.frozen[key]) { el.classList.add('froze'); mark = '❄'; }
+    else if (st.mended[key]) { el.classList.add('mend'); mark = '🪡'; }
+    else if (day.you || day.buddy) { el.classList.add('half'); mark = '✓'; }
     else if (key >= S.createdAt && key < todayKey()) { el.classList.add('miss'); }
     if (i === 0) el.classList.add('today');
     el.innerHTML = `<div class="dot">${mark}</div>` +
@@ -539,9 +635,9 @@ function dustPuff(container) {
 }
 
 /* ── sticker reveal flow ───────────────────── */
-let pendingSticker = null;
-function openReveal(sticker, lead) {
-  pendingSticker = sticker;
+let pendingSticker = null, pendingKind = null;
+function openReveal(sticker, lead, kind) {
+  pendingSticker = sticker; pendingKind = kind || 'drop';
   $('#reveal-lead').textContent = lead;
   $('#mystery').hidden = false;
   $('#reveal-result').hidden = true;
@@ -563,13 +659,41 @@ $('#mystery').addEventListener('click', () => {
   if (s.rarity === 'precious') confetti();
 });
 $('#reveal-stick').addEventListener('click', () => {
-  $('#reveal').hidden = true; pendingSticker = null;
+  if (pendingKind === 'gift' && pendingSticker) {
+    const day = (S.days[todayKey()] = S.days[todayKey()] || {});
+    day.giftClaimed = true;
+    S.stickers[pendingSticker.id] = (S.stickers[pendingSticker.id] || 0) + 1;
+    const leftSide = Math.random() < 0.5;
+    day.giftSticker = {
+      id: pendingSticker.id,
+      x: leftSide ? 1 + Math.random() * 8 : 76 + Math.random() * 10,
+      y: 34 + Math.random() * 46,
+      rot: -18 + Math.random() * 36,
+    };
+    save();
+  }
+  $('#reveal').hidden = true; pendingSticker = null; pendingKind = null;
   buzz(15); renderHome(); maybeCelebrate();
 });
 
-/* ── milestones ────────────────────────────── */
+/* ── milestones & mend celebrations ────────── */
 function maybeCelebrate() {
   const st = computeStreaks();
+  /* a tear was just stitched shut */
+  const justMended = Object.keys(st.mended)
+    .find((k) => dateKey(addDays(new Date(k + 'T12:00'), 3)) === todayKey() &&
+                 !S.celebrated.includes('mend-' + k));
+  if (justMended) {
+    S.celebrated.push('mend-' + justMended); save();
+    $('#celebrate-seal').textContent = '🪡';
+    $('#celebrate-title').textContent = 'the tear is mended!';
+    $('#celebrate-text').textContent =
+      `Three days in a row — the missed page is stitched shut and your ${st.pair}-day ` +
+      'streak lives on. Broken-and-repaired is a better story than never-broken.';
+    $('#celebrate').hidden = false;
+    chime(); buzz([30, 60, 30]); confetti();
+    return;
+  }
   const hit = MILESTONES.filter((m) => st.pair >= m && !S.celebrated.includes(m)).pop();
   if (!hit) return;
   S.celebrated.push(hit); save();
@@ -628,16 +752,39 @@ function renderJournal() {
     list.innerHTML = '<p class="journal-empty">Your story starts with today\'s first stamp.</p>';
     return;
   }
+  let curMonth = null;
   keys.forEach((key) => {
+    const month = key.slice(0, 7);
+    if (month !== curMonth) {
+      curMonth = month;
+      const mdays = keys.filter((k) => k.startsWith(month)).map((k) => S.days[k] || {});
+      const stamps = mdays.filter((d) => d.you).length;
+      const both = mdays.filter((d) => d.you && d.buddy).length;
+      const skn = mdays.filter((d) => d.sticker || d.giftSticker).length;
+      const mc = document.createElement('div');
+      mc.className = 'month-card';
+      mc.innerHTML =
+        `<div class="washi washi-rose"></div>` +
+        `<div class="month-name script">${new Date(key + 'T12:00')
+          .toLocaleDateString(undefined, { month: 'long', year: 'numeric' }).toLowerCase()}</div>` +
+        `<div class="month-stats">` +
+        `<span class="mstat">🖋️ ${stamps} stamps</span>` +
+        `<span class="mstat">★ ${both} together</span>` +
+        `<span class="mstat">🌼 ${skn} stickers</span>` +
+        `</div>`;
+      list.appendChild(mc);
+    }
     const day = S.days[key] || {};
-    const sk = day.sticker && BY_ID[day.sticker.id];
+    const sk = (day.sticker && BY_ID[day.sticker.id]) ||
+               (day.giftSticker && BY_ID[day.giftSticker.id]);
     const el = document.createElement('div');
     el.className = 'journal-day';
     const youCls = day.you ? 'on' : (st.frozen[key] ? 'froze' : '');
+    const youMark = day.you ? '✓' : (st.frozen[key] ? '❄' : (st.mended[key] ? '🪡' : '·'));
     el.innerHTML =
       `<div class="jd-date script">${shortDate(key)}</div>` +
       `<div class="mini-stamps">` +
-      `<div class="mini ${youCls}">${day.you ? '✓' : (st.frozen[key] ? '❄' : '·')}</div>` +
+      `<div class="mini ${youCls}">${youMark}</div>` +
       `<div class="mini buddy ${day.buddy ? 'on' : ''}">${day.buddy ? '✓' : '·'}</div>` +
       `${sk ? `<div class="mini" title="${sk.name}">${sk.emoji}</div>` : ''}` +
       `</div>` +
@@ -653,15 +800,23 @@ function escapeHTML(s) {
 /* ── settings ──────────────────────────────── */
 function renderSettings() {
   $('#set-name').value = S.name; $('#set-goal').value = S.goal;
-  $('#set-time').value = S.time;
+  $('#set-time').value = S.time; $('#set-why').value = S.why;
+  $('#set-reminder').checked = S.reminder;
   $('#set-sound').checked = S.sound; $('#set-haptics').checked = S.haptics;
 }
 $('#btn-save-settings').addEventListener('click', () => {
   S.name = $('#set-name').value.trim() || S.name;
   S.goal = $('#set-goal').value.trim() || S.goal;
   S.time = $('#set-time').value || S.time;
+  S.why = $('#set-why').value.trim();
+  S.reminder = $('#set-reminder').checked;
   S.sound = $('#set-sound').checked; S.haptics = $('#set-haptics').checked;
-  save(); buzz(15); show('home');
+  save(); syncReminder(); buzz(15); show('home');
+});
+$('#why-save').addEventListener('click', () => {
+  const v = $('#why-input').value.trim();
+  if (!v) return $('#why-input').focus();
+  S.why = v; save(); buzz(15); renderHome();
 });
 $('#btn-reset').addEventListener('click', () => {
   if (confirm('Start over? Your whole scrapbook will be erased.')) {
@@ -671,6 +826,6 @@ $('#btn-reset').addEventListener('click', () => {
 
 /* ── boot ──────────────────────────────────── */
 if (!S) { show('onboarding'); obShow(0); }
-else { syncBuddy(); show('home'); }
+else { syncBuddy(); syncReminder(); show('home'); }
 document.body.dataset.ready = '1';
 setInterval(syncBuddy, 30 * 1000);   // Sunny can stamp & react while the app is open
