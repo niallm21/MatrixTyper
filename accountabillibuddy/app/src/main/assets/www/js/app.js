@@ -7,8 +7,34 @@
 'use strict';
 
 const STORE_KEY = 'abb.state.v1';
+const LOG_KEY = 'abb.log.v1';
+const APP_VERSION = '0.4.0';
 const MILESTONES = [3, 7, 14, 30, 60, 100];
 const $ = (sel) => document.querySelector(sel);
+
+/* ── flight recorder ───────────────────────────
+   A private on-device diary of how the app FEELS
+   in use: timings, dwell, hesitation, sessions.
+   Nothing leaves the phone until the user builds
+   and sends the report themselves. */
+const openedAt = Date.now();
+let LOG = (() => {
+  try { return JSON.parse(localStorage.getItem(LOG_KEY)) || { events: [], notes: [] }; }
+  catch { return { events: [], notes: [] }; }
+})();
+function track(e, props) {
+  LOG.events.push(Object.assign({ t: Date.now(), e }, props || {}));
+  if (LOG.events.length > 1500) LOG.events.splice(0, LOG.events.length - 1500);
+  try { localStorage.setItem(LOG_KEY, JSON.stringify(LOG)); } catch { /* full */ }
+}
+track('app_open', { v: APP_VERSION });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    track('session_end', { dur: Date.now() - openedAt });
+  } else {
+    track('app_resume');
+  }
+});
 
 /* ── sticker catalog ───────────────────────────
    Variable-ratio reward: every check-in earns a
@@ -360,6 +386,7 @@ function show(name) {
   $('#tabbar').hidden = name === 'onboarding';
   document.querySelectorAll('.tab').forEach((t) =>
     t.classList.toggle('active', t.dataset.screen === name));
+  track('screen', { s: name });
   if (name === 'home') renderHome();
   if (name === 'journal') renderJournal();
   if (name === 'stickers') renderStickerBook();
@@ -453,6 +480,7 @@ function renderHome(animateBuddy = false) {
       g.setAttribute('aria-label', 'open Sunny\'s gift');
       bp.appendChild(g);
       g.addEventListener('click', () => {
+        track('gift_open');
         openReveal(BY_ID[day.gift], 'Sunny left this on your page…', 'gift');
         buzz(15);
       });
@@ -582,6 +610,7 @@ function renderQuests() {
   /* golden week reward: all three quests → precious sticker */
   if (allDone && !S.questRewards[wk]) {
     S.questRewards[wk] = true; save();
+    track('golden_week');
     const pool = STICKERS.filter((s) => s.rarity === 'precious');
     const pick = pool[Math.floor(Math.random() * pool.length)];
     S.stickers[pick.id] = (S.stickers[pick.id] || 0) + 1; save();
@@ -607,6 +636,12 @@ $('#btn-checkin').addEventListener('click', () => {
   day.youLate = now - target > 4 * 3600 * 1000;
   const sticker = grantSticker(day, day.youEarly);
   save();
+  track('checkin', {
+    sinceOpen: now.getTime() - openedAt,
+    vsTargetMin: Math.round((now - target) / 60000),
+    early: !!day.youEarly, late: !!day.youLate,
+    rarity: sticker.rarity,
+  });
   thunk(); buzz(35);
   renderHome();
   const stamp = $('#you-photo .stamp');
@@ -635,9 +670,10 @@ function dustPuff(container) {
 }
 
 /* ── sticker reveal flow ───────────────────── */
-let pendingSticker = null, pendingKind = null;
+let pendingSticker = null, pendingKind = null, revealShownAt = 0, peeledAt = 0;
 function openReveal(sticker, lead, kind) {
   pendingSticker = sticker; pendingKind = kind || 'drop';
+  revealShownAt = Date.now();
   $('#reveal-lead').textContent = lead;
   $('#mystery').hidden = false;
   $('#reveal-result').hidden = true;
@@ -645,6 +681,8 @@ function openReveal(sticker, lead, kind) {
 }
 $('#mystery').addEventListener('click', () => {
   const s = pendingSticker; if (!s) return;
+  peeledAt = Date.now();
+  track('peel', { dwell: peeledAt - revealShownAt, kind: pendingKind, rarity: s.rarity });
   peelSound(); buzz(20);
   $('#mystery').hidden = true;
   const frame = $('#reveal-sticker');
@@ -672,6 +710,7 @@ $('#reveal-stick').addEventListener('click', () => {
     };
     save();
   }
+  track('stick', { admire: Date.now() - peeledAt, kind: pendingKind });
   $('#reveal').hidden = true; pendingSticker = null; pendingKind = null;
   buzz(15); renderHome(); maybeCelebrate();
 });
@@ -685,6 +724,7 @@ function maybeCelebrate() {
                  !S.celebrated.includes('mend-' + k));
   if (justMended) {
     S.celebrated.push('mend-' + justMended); save();
+    track('celebrate', { kind: 'mend' });
     $('#celebrate-seal').textContent = '🪡';
     $('#celebrate-title').textContent = 'the tear is mended!';
     $('#celebrate-text').textContent =
@@ -697,6 +737,7 @@ function maybeCelebrate() {
   const hit = MILESTONES.filter((m) => st.pair >= m && !S.celebrated.includes(m)).pop();
   if (!hit) return;
   S.celebrated.push(hit); save();
+  track('celebrate', { kind: 'milestone', n: hit });
   $('#celebrate-seal').textContent = hit;
   $('#celebrate-title').textContent = { 3: 'three days!', 7: 'a whole week!', 14: 'two weeks!',
     30: 'a month!!', 60: 'sixty days!', 100: 'one hundred!' }[hit] || hit + ' days!';
@@ -803,6 +844,8 @@ function renderSettings() {
   $('#set-time').value = S.time; $('#set-why').value = S.why;
   $('#set-reminder').checked = S.reminder;
   $('#set-sound').checked = S.sound; $('#set-haptics').checked = S.haptics;
+  $('#fb-count').textContent =
+    `${LOG.events.length} moments captured · ${LOG.notes.length} notes jotted`;
 }
 $('#btn-save-settings').addEventListener('click', () => {
   S.name = $('#set-name').value.trim() || S.name;
@@ -823,6 +866,85 @@ $('#btn-reset').addEventListener('click', () => {
     localStorage.removeItem(STORE_KEY); location.reload();
   }
 });
+
+/* ── feedback & report ─────────────────────── */
+function fmtT(t) {
+  const d = new Date(t);
+  return String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') +
+    ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+function sec(ms) { return (ms / 1000).toFixed(1) + 's'; }
+function avg(a) { return a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0; }
+
+function buildReport() {
+  const st = computeStreaks();
+  const ev = LOG.events;
+  const by = (name) => ev.filter((e) => e.e === name);
+  const sessions = by('session_end').map((e) => e.dur);
+  const checkins = by('checkin');
+  const peels = by('peel');
+  const screens = {};
+  by('screen').forEach((e) => (screens[e.s] = (screens[e.s] || 0) + 1));
+  const daysActive = new Set(ev.map((e) => new Date(e.t).toDateString())).size;
+  const mendCount = Object.keys(st.mended).length;
+  const distinct = Object.keys(S.stickers).filter((k) => S.stickers[k] > 0).length;
+
+  const lines = [];
+  lines.push('══ ACCOUNTABILLIBUDDY FEEDBACK REPORT ══');
+  lines.push(`version ${APP_VERSION} · generated ${fmtT(Date.now())}`);
+  lines.push(`viewport ${innerWidth}x${innerHeight} · ${navigator.userAgent.slice(0, 80)}`);
+  lines.push('');
+  lines.push('── scrapbook state ──');
+  lines.push(`goal: "${S.goal}" (${S.cat}) · target ${S.time} · reminder ${S.reminder ? 'on' : 'off'}`);
+  lines.push(`since ${S.createdAt} · stamps ${st.totalStamps} · pair streak ${st.pair} (best ${st.maxPair})`);
+  lines.push(`freezes ${st.freezes} · mends ${mendCount} · stickers ${distinct}/${STICKERS.length} distinct` +
+    ` · golden weeks ${Object.keys(S.questRewards).length}`);
+  lines.push(`why note: ${S.why ? '"' + S.why + '"' : '(not set)'}`);
+  lines.push('');
+  lines.push('── behavior ──');
+  lines.push(`days with app opened: ${daysActive} · sessions logged: ${sessions.length}` +
+    ` · avg session ${sec(avg(sessions))}`);
+  if (checkins.length) {
+    lines.push(`check-ins: ${checkins.length} · avg ${sec(avg(checkins.map((c) => c.sinceOpen)))} after open` +
+      ` · avg ${Math.round(avg(checkins.map((c) => c.vsTargetMin)))}min vs target` +
+      ` · early-bird ${checkins.filter((c) => c.early).length}/${checkins.length}`);
+  }
+  if (peels.length) {
+    lines.push(`sticker peels: ${peels.length} · avg dwell before peel ${sec(avg(peels.map((p) => p.dwell)))}` +
+      ` · max ${sec(Math.max(...peels.map((p) => p.dwell)))}`);
+  }
+  lines.push('screen visits: ' + Object.entries(screens).map(([k, v]) => `${k} ${v}`).join(' · '));
+  lines.push('');
+  lines.push('── your jotted notes ──');
+  if (!LOG.notes.length) lines.push('(none yet)');
+  LOG.notes.forEach((n) => lines.push(`${fmtT(n.t)}  "${n.text}"`));
+  lines.push('');
+  lines.push(`── last events (${Math.min(ev.length, 60)} of ${ev.length}) ──`);
+  ev.slice(-60).forEach((e) => {
+    const extra = Object.entries(e).filter(([k]) => k !== 't' && k !== 'e')
+      .map(([k, v]) => `${k}=${typeof v === 'number' && v > 999 ? sec(v) : v}`).join(' ');
+    lines.push(`${fmtT(e.t)}  ${e.e}${extra ? '  ' + extra : ''}`);
+  });
+  return lines.join('\n');
+}
+
+$('#fb-add').addEventListener('click', () => {
+  const text = $('#fb-note').value.trim();
+  if (!text) return $('#fb-note').focus();
+  LOG.notes.push({ t: Date.now(), text });
+  track('note_jotted', { len: text.length });
+  $('#fb-note').value = '';
+  renderSettings(); buzz(15);
+});
+$('#fb-export').addEventListener('click', () => {
+  const report = buildReport();
+  track('report_built');
+  $('#report-text').value = report;
+  $('#report-modal').hidden = false;
+  try { navigator.clipboard.writeText(report); }
+  catch { $('#report-text').select(); try { document.execCommand('copy'); } catch { /* manual */ } }
+});
+$('#report-close').addEventListener('click', () => ($('#report-modal').hidden = true));
 
 /* ── boot ──────────────────────────────────── */
 if (!S) { show('onboarding'); obShow(0); }

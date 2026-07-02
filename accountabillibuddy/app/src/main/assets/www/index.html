@@ -178,11 +178,34 @@
       <label class="toggle-row"><span>Haptics</span><input id="set-haptics" type="checkbox" checked></label>
       <button class="btn primary" id="btn-save-settings">save</button>
       <hr class="rule">
-      <p class="hint small">Accountabillibuddy v0.1 — practice-buddy preview.<br>
+      <div class="fb-section">
+        <span class="script fb-title">feedback &amp; tuning</span>
+        <p class="hint small">The app keeps a private diary of how it's being used —
+          <strong>it never leaves your phone</strong> until you copy it and send it yourself.
+          Jot a feeling any time; it lands in the report with a timestamp.</p>
+        <label class="field">
+          <input id="fb-note" type="text" maxlength="200" placeholder="e.g. the peel felt slow · loved the mend thing">
+        </label>
+        <button class="btn" id="fb-add">jot it down</button>
+        <button class="btn primary" id="fb-export">build my feedback report</button>
+        <p class="hint small" id="fb-count"></p>
+      </div>
+      <hr class="rule">
+      <p class="hint small">Accountabillibuddy v0.4 — practice-buddy preview.<br>
          Real buddy matching, challenges &amp; super buddies are on the roadmap.</p>
       <button class="btn danger ghost" id="btn-reset">start a fresh scrapbook</button>
     </div>
   </section>
+
+  <!-- ══════════ FEEDBACK REPORT ══════════ -->
+  <div id="report-modal" class="celebrate" hidden>
+    <div class="celebrate-card page-card report-card">
+      <h2 class="script lg">your feedback report</h2>
+      <p class="hint small">Copied to clipboard — paste it to the maker. (Or long-press the text below.)</p>
+      <textarea id="report-text" class="report-text" readonly></textarea>
+      <button class="btn primary" id="report-close">done</button>
+    </div>
+  </div>
 
   <!-- ══════════ STICKER REVEAL ══════════ -->
   <div id="reveal" class="celebrate" hidden>
