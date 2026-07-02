@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF3DC">
+<title>Accountabillibuddy</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div class="grain" aria-hidden="true"></div>
+
+<main id="app">
+
+  <!-- ══════════ ONBOARDING ══════════ -->
+  <section id="screen-onboarding" class="screen" hidden>
+    <div class="ob-card page-card">
+      <div class="washi washi-rose"></div>
+
+      <div class="ob-step" data-step="0">
+        <h1 class="script xl">accountabillibuddy</h1>
+        <p class="tagline">a little scrapbook of showing&nbsp;up — together</p>
+        <div class="ob-doodle">✿ ❀ ✿</div>
+        <label class="field">
+          <span>What should we call you?</span>
+          <input id="ob-name" type="text" maxlength="20" placeholder="your first name" autocomplete="off">
+        </label>
+        <button class="btn primary" data-next>let's begin</button>
+      </div>
+
+      <div class="ob-step" data-step="1" hidden>
+        <h2 class="script lg">what's the goal?</h2>
+        <p class="hint">Pick one thing. Small and daily beats big and vague.</p>
+        <div class="chips" id="ob-cats">
+          <button class="chip" data-cat="move">🏃 move</button>
+          <button class="chip" data-cat="write">✍️ write</button>
+          <button class="chip" data-cat="study">📚 study</button>
+          <button class="chip" data-cat="create">🎨 create</button>
+          <button class="chip" data-cat="health">🌿 health</button>
+          <button class="chip" data-cat="other">✨ other</button>
+        </div>
+        <label class="field">
+          <span>In your words</span>
+          <input id="ob-goal" type="text" maxlength="60" placeholder="e.g. 20 minutes of running" autocomplete="off">
+        </label>
+        <button class="btn primary" data-next>next</button>
+      </div>
+
+      <div class="ob-step" data-step="2" hidden>
+        <h2 class="script lg">when will you do it?</h2>
+        <p class="hint">A firm time makes it real. We'll build your page around it.</p>
+        <label class="field">
+          <span>My daily check-in time</span>
+          <input id="ob-time" type="time" value="07:30">
+        </label>
+        <p class="hint small">You can check in any time that day — this is your target.</p>
+        <button class="btn primary" data-finish>meet my buddy</button>
+      </div>
+
+      <div class="ob-step" data-step="3" hidden>
+        <div class="buddy-intro">
+          <div class="avatar big">🌻</div>
+          <h2 class="script lg">this is Sunny</h2>
+          <p>Your <strong>practice buddy</strong> while real matching is being built.
+             Sunny checks in every day around your time, cheers you on, and shares
+             your streak — so the habit is solid before a real human joins your page.</p>
+        </div>
+        <button class="btn primary" data-start>open our scrapbook</button>
+      </div>
+
+      <div class="ob-progress"><i></i><i></i><i></i><i></i></div>
+    </div>
+  </section>
+
+  <!-- ══════════ TODAY ══════════ -->
+  <section id="screen-home" class="screen" hidden>
+    <header class="home-head">
+      <div>
+        <div class="script lg" id="today-date">—</div>
+        <div class="goal-line" id="goal-line">—</div>
+      </div>
+      <div class="streak-badge" id="streak-badge" title="pair streak">
+        <span class="flame">🔥</span><span id="streak-num">0</span>
+      </div>
+    </header>
+
+    <div class="page-card today-page" id="today-page">
+      <div class="washi washi-sage"></div>
+      <div class="washi washi-denim right"></div>
+
+      <div class="slots">
+        <div class="slot" id="slot-you">
+          <div class="polaroid">
+            <div class="photo-area" id="you-photo">
+              <div class="empty-hint script">waiting for<br>your stamp…</div>
+            </div>
+            <div class="polaroid-label script" id="you-label">you</div>
+          </div>
+        </div>
+        <div class="slot" id="slot-buddy">
+          <div class="polaroid">
+            <div class="photo-area" id="buddy-photo">
+              <div class="empty-hint script">Sunny hasn't<br>stamped yet</div>
+            </div>
+            <div class="polaroid-label script">Sunny 🌻</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="buddy-note" id="buddy-note" hidden>
+        <span class="script note-text" id="buddy-note-text"></span>
+      </div>
+
+      <div class="checkin-zone" id="checkin-zone">
+        <button class="btn stamp-btn" id="btn-checkin">
+          <span class="stamp-btn-face">✓&nbsp; I showed up</span>
+        </button>
+        <p class="hint small" id="checkin-hint">target: <span id="target-time">7:30</span></p>
+      </div>
+
+      <label class="field note-field" id="note-field">
+        <span class="script">leave a note on today's page…</span>
+        <input id="you-note" type="text" maxlength="120" placeholder="how did it go?">
+      </label>
+
+      <div class="week-strip" id="week-strip"></div>
+      <div class="seal-row" id="seal-row"></div>
+    </div>
+
+    <div class="freeze-line" id="freeze-line"></div>
+  </section>
+
+  <!-- ══════════ JOURNAL ══════════ -->
+  <section id="screen-journal" class="screen" hidden>
+    <h2 class="script lg screen-title">our journal</h2>
+    <div id="journal-list"></div>
+  </section>
+
+  <!-- ══════════ SETTINGS ══════════ -->
+  <section id="screen-settings" class="screen" hidden>
+    <h2 class="script lg screen-title">settings</h2>
+    <div class="page-card settings-card">
+      <div class="washi washi-rose"></div>
+      <label class="field"><span>Name</span><input id="set-name" type="text" maxlength="20"></label>
+      <label class="field"><span>Goal</span><input id="set-goal" type="text" maxlength="60"></label>
+      <label class="field"><span>Check-in time</span><input id="set-time" type="time"></label>
+      <label class="toggle-row"><span>Sounds</span><input id="set-sound" type="checkbox" checked></label>
+      <label class="toggle-row"><span>Haptics</span><input id="set-haptics" type="checkbox" checked></label>
+      <button class="btn primary" id="btn-save-settings">save</button>
+      <hr class="rule">
+      <p class="hint small">Accountabillibuddy v0.1 — practice-buddy preview.<br>
+         Real buddy matching, challenges &amp; super buddies are on the roadmap.</p>
+      <button class="btn danger ghost" id="btn-reset">start a fresh scrapbook</button>
+    </div>
+  </section>
+
+  <!-- ══════════ CELEBRATION OVERLAY ══════════ -->
+  <div id="celebrate" class="celebrate" hidden>
+    <div class="celebrate-card page-card">
+      <div class="wax-seal huge" id="celebrate-seal">7</div>
+      <h2 class="script lg" id="celebrate-title">seven days!</h2>
+      <p id="celebrate-text">A whole week of showing up, together.</p>
+      <button class="btn primary" id="celebrate-close">keep going</button>
+    </div>
+  </div>
+
+</main>
+
+<nav class="tabbar" id="tabbar" hidden>
+  <button class="tab active" data-screen="home"><span>📖</span>today</button>
+  <button class="tab" data-screen="journal"><span>🗂️</span>journal</button>
+  <button class="tab" data-screen="settings"><span>🪡</span>settings</button>
+</nav>
+
+<script src="js/app.js"></script>
+</body>
+</html>
