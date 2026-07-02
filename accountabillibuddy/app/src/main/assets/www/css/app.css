@@ -266,6 +266,94 @@ body {
 .tab span { font-size:1.25rem; }
 .tab.active { color:var(--terracotta); background:#F9EFE0; }
 
+/* ── header extras ──────────────────────────── */
+.title-line { color:var(--terracotta); font-size:1.2rem; line-height:1; margin-top:2px; }
+.flame { display:inline-block; transition:transform .3s; }
+.streak-badge.t1 .flame { transform:scale(.85); }
+.streak-badge.t2 { background:#FCF3DF; }
+.streak-badge.t3 { background:#FAE9CE; box-shadow:0 0 0 2px rgba(232,168,60,.35), var(--shadow); }
+.streak-badge.t4 { background:linear-gradient(135deg,#FAE9CE,#F6D8A0);
+  box-shadow:0 0 12px rgba(232,168,60,.55), var(--shadow); }
+.streak-badge.t3 .flame, .streak-badge.t4 .flame { transform:scale(1.15); }
+.streak-badge.tension { animation:pulse 2.2s ease-in-out infinite; }
+@keyframes pulse { 50% { transform:rotate(2deg) scale(1.07); } }
+.tension-line { text-align:center; color:var(--ink-soft); font-size:1.25rem; margin-top:14px; }
+
+/* ── stamps: early-bird gold edge, crown, reaction ── */
+.stamp.early { box-shadow:inset 0 0 0 2px rgba(255,255,255,.5), inset 0 0 0 5px currentColor,
+  0 0 0 3px rgba(232,168,60,.55); }
+.crown { position:absolute; top:2px; right:6px; font-size:1.2rem; transform:rotate(12deg);
+  filter:drop-shadow(0 1px 1px rgba(90,70,40,.3)); }
+.react-doodle { position:absolute; bottom:4px; left:6px; font-size:1.25rem; transform:rotate(-10deg);
+  animation:pop .4s cubic-bezier(.2,1.4,.4,1) both; }
+
+/* ── stickers on the page ───────────────────── */
+.sticker-layer { position:absolute; inset:0; pointer-events:none; overflow:hidden; border-radius:6px; }
+.sticker-frame {
+  position:relative; display:flex; align-items:center; justify-content:center;
+  width:52px; height:52px; border-radius:50%; background:#fff; font-size:28px;
+  box-shadow:0 2px 5px rgba(90,70,40,.25);
+}
+.sticker-layer .sticker-frame { position:absolute; animation:stickIn .45s cubic-bezier(.25,1.4,.4,1) both; }
+@keyframes stickIn { 0% { transform:scale(2) rotate(20deg); opacity:0; } 100% { opacity:1; } }
+.sticker-frame.uncommon { background:#F2F6EF; box-shadow:0 0 0 3px var(--sage), 0 2px 5px rgba(90,70,40,.25); }
+.sticker-frame.rare { box-shadow:0 0 0 3px var(--marigold), 0 2px 8px rgba(200,140,30,.45); }
+.sticker-frame.rare::after, .sticker-frame.precious::after {
+  content:''; position:absolute; inset:0; border-radius:50%; pointer-events:none;
+  background:linear-gradient(115deg, transparent 30%, rgba(255,255,255,.8) 45%, transparent 60%);
+  background-size:250% 250%; animation:shine 2.6s ease-in-out infinite;
+}
+@keyframes shine { 0%{background-position:120% 0} 60%,100%{background-position:-60% 0} }
+.sticker-frame.precious {
+  background:linear-gradient(135deg,#FFF3D6,#FBE3EE,#E3EEFB,#FFF3D6);
+  box-shadow:0 0 0 3px #E8A83C, 0 0 14px rgba(232,168,60,.6);
+}
+.sticker-frame.big { width:110px; height:110px; font-size:60px; margin:0 auto 10px; }
+
+/* ── reveal overlay ─────────────────────────── */
+.reveal-card { max-width:300px; }
+.reveal-lead { font-size:1.5rem; }
+.mystery {
+  width:110px; height:110px; border-radius:50%; border:2.5px dashed var(--rose);
+  background:repeating-linear-gradient(45deg,#FDF6E4 0 10px,#FBEFD5 10px 20px);
+  font-family:'Caveat'; font-size:3rem; color:var(--ink-soft);
+  margin:8px auto 4px; display:flex; align-items:center; justify-content:center;
+  animation:wiggle 1.6s ease-in-out infinite;
+}
+@keyframes wiggle { 0%,100%{transform:rotate(-4deg)} 50%{transform:rotate(5deg) scale(1.05)} }
+.reveal-name { font-size:1.6rem; }
+.rarity-tag { font-size:.72rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase;
+  color:var(--ink-soft); margin:2px 0 6px; }
+.rarity-tag.rare { color:#B07C1A; }
+.rarity-tag.precious { color:#B4589A; }
+
+/* ── sticker book ───────────────────────────── */
+.collect-progress { margin:0 6px 14px; }
+.sticker-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px 8px; padding:0 2px; }
+.cell { text-align:center; }
+.cell .sticker-frame { margin:0 auto; }
+.cell .cell-name { font-size:.66rem; color:var(--ink-soft); margin-top:4px; line-height:1.2; }
+.cell.locked .sticker-frame { background:#F1E9D2; box-shadow:none; border:2px dashed #DECFA8;
+  color:#C9B98F; filter:grayscale(1); font-size:22px; }
+.cell .count { position:absolute; bottom:-4px; right:-4px; background:var(--ink); color:#FFF9EA;
+  font-size:.62rem; font-weight:800; border-radius:999px; padding:1px 5px; }
+
+/* ── quest card ─────────────────────────────── */
+.quest-card { margin-top:20px; padding:18px 18px 14px; transform:rotate(.4deg); }
+.paperclip { position:absolute; top:-12px; right:26px; width:16px; height:34px;
+  border:3px solid #9AA3AE; border-radius:8px; border-bottom:none; opacity:.8; }
+.quest-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; }
+.quest-title { font-size:1.5rem; }
+.race-tally { font-size:.78rem; color:var(--ink-soft); font-weight:700; }
+.quest { margin:10px 0; }
+.quest-row { display:flex; justify-content:space-between; font-size:.88rem; font-weight:700; }
+.quest-row .q-done { color:#7E9B6E; }
+.qbar { height:8px; background:#F1E6C8; border-radius:99px; margin-top:4px; overflow:hidden; }
+.qbar i { display:block; height:100%; background:var(--sage); border-radius:99px;
+  transition:width .6s cubic-bezier(.2,.9,.3,1); }
+.quest.done .qbar i { background:var(--marigold); }
+.golden-week { text-align:center; font-size:1.35rem; color:#B07C1A; margin-top:8px; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration:.01ms !important; transition-duration:.01ms !important; }
 }

@@ -1,5 +1,8 @@
 /* ═══════════════════════════════════════════════
-   Accountabillibuddy v0.1 — practice-buddy preview
+   Accountabillibuddy v0.2 — the dopamine update
+   Every reward triggers off ONE thing only: a real
+   check-in on a real goal. No engagement for its
+   own sake; the addiction points at showing up.
    ═══════════════════════════════════════════════ */
 'use strict';
 
@@ -7,23 +10,83 @@ const STORE_KEY = 'abb.state.v1';
 const MILESTONES = [3, 7, 14, 30, 60, 100];
 const $ = (sel) => document.querySelector(sel);
 
+/* ── sticker catalog ───────────────────────────
+   Variable-ratio reward: every check-in earns a
+   sticker; RARITY is the variable part. Pity rule
+   guarantees a rare+ at least every 7 check-ins. */
+const RARITY = {
+  common:   { label: 'common',   weight: 55, early: 45 },
+  uncommon: { label: 'uncommon', weight: 30, early: 32 },
+  rare:     { label: 'rare',     weight: 12, early: 18 },
+  precious: { label: 'precious', weight: 3,  early: 5  },
+};
+const STICKERS = [
+  // common — everyday scrapbook flora & bits
+  ['c1', '🌼', 'little daisy', 'common'], ['c2', '🌿', 'pressed fern', 'common'],
+  ['c3', '🍓', 'sweet berry', 'common'], ['c4', '🍋', 'zesty lemon', 'common'],
+  ['c5', '🌷', 'spring tulip', 'common'], ['c6', '🐞', 'lucky ladybug', 'common'],
+  ['c7', '🍄', 'forest cap', 'common'], ['c8', '🌻', 'sunny\'s twin', 'common'],
+  ['c9', '☕', 'morning cup', 'common'], ['c10', '🧵', 'gold thread', 'common'],
+  ['c11', '🍂', 'autumn leaf', 'common'], ['c12', '🫐', 'blueberries', 'common'],
+  // uncommon — little companions
+  ['u1', '🦔', 'brave hedgehog', 'uncommon'], ['u2', '🐝', 'busy bee', 'uncommon'],
+  ['u3', '🐢', 'steady turtle', 'uncommon'], ['u4', '🦆', 'pond duck', 'uncommon'],
+  ['u5', '🍰', 'victory cake', 'uncommon'], ['u6', '🌈', 'after the rain', 'uncommon'],
+  ['u7', '🎈', 'red balloon', 'uncommon'], ['u8', '🧸', 'old friend', 'uncommon'],
+  ['u9', '🪴', 'growing thing', 'uncommon'], ['u10', '📚', 'well-read', 'uncommon'],
+  // rare — foil-edged
+  ['r1', '🌙', 'paper moon', 'rare'], ['r2', '⭐', 'gold star', 'rare'],
+  ['r3', '🦋', 'foil butterfly', 'rare'], ['r4', '🕊️', 'peace dove', 'rare'],
+  ['r5', '🍯', 'amber honey', 'rare'], ['r6', '🎻', 'tiny violin', 'rare'],
+  ['r7', '🗝️', 'brass key', 'rare'],
+  // precious — holographic
+  ['p1', '👑', 'the crown', 'precious'], ['p2', '🏆', 'the trophy', 'precious'],
+  ['p3', '💫', 'shooting star', 'precious'], ['p4', '🔮', 'crystal ball', 'precious'],
+  ['p5', '🪞', 'magic mirror', 'precious'],
+].map(([id, emoji, name, rarity]) => ({ id, emoji, name, rarity }));
+const BY_ID = Object.fromEntries(STICKERS.map((s) => [s.id, s]));
+
+/* ── quest pool (weekly, deterministic pick) ── */
+const QUESTS = [
+  { id: 'early3', text: 'stamp before your target time 3×', goal: 3,
+    count: (d) => d.filter((x) => x.youEarly).length },
+  { id: 'notes2', text: 'leave 2 notes on your pages', goal: 2,
+    count: (d) => d.filter((x) => x.youNote).length },
+  { id: 'both5', text: 'you + Sunny both stamp, 5 days', goal: 5,
+    count: (d) => d.filter((x) => x.you && x.buddy).length },
+  { id: 'first3', text: 'beat Sunny to the page 3×', goal: 3,
+    count: (d) => d.filter((x) => x.you && x.buddy && x.you < x.buddy).length },
+  { id: 'weekend', text: 'stamp Saturday AND Sunday', goal: 2,
+    count: (d) => d.filter((x) => x.you && (x._dow === 0 || x._dow === 6)).length },
+];
+
+/* ── titles: identity progression ───────────── */
+const TITLES = [
+  [100, 'legend of the book'], [60, 'unstoppable'], [30, 'keeper of pages'],
+  [15, 'the regular'], [7, 'one week strong'], [3, 'getting started'], [1, 'day one'],
+];
+
 /* ── state ─────────────────────────────────── */
 let S = load();
-
 function load() {
-  try { return JSON.parse(localStorage.getItem(STORE_KEY)) || null; }
+  try { return migrate(JSON.parse(localStorage.getItem(STORE_KEY))); }
   catch { return null; }
 }
+function migrate(s) {
+  if (!s) return null;
+  s.stickers = s.stickers || {};           // id -> count
+  s.pity = s.pity || 0;                    // check-ins since last rare+
+  s.questRewards = s.questRewards || {};   // weekKey -> true
+  s.celebrated = s.celebrated || [];
+  return s;
+}
 function save() { localStorage.setItem(STORE_KEY, JSON.stringify(S)); }
-
 function freshState(name, goal, cat, time) {
-  return {
-    name, goal, cat, time,                 // time = "HH:MM"
+  return migrate({
+    name, goal, cat, time,
     createdAt: dateKey(new Date()),
-    days: {},                              // "YYYY-MM-DD" -> {you, youLate, youNote, buddy, buddyNote}
-    sound: true, haptics: true,
-    celebrated: [],                        // milestone numbers already shown
-  };
+    days: {}, sound: true, haptics: true, celebrated: [],
+  });
 }
 
 /* ── date helpers ──────────────────────────── */
@@ -39,6 +102,22 @@ function niceDate(d) {
 function shortDate(key) {
   const d = new Date(key + 'T12:00');
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+/* Monday-start key of the week a date belongs to */
+function weekKey(d) {
+  const x = new Date(d); x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+  return dateKey(x);
+}
+function weekDays() {
+  const start = new Date(weekKey(new Date()) + 'T12:00'), out = [];
+  for (let i = 0; i < 7; i++) {
+    const key = dateKey(addDays(start, i));
+    if (key > todayKey()) break;
+    const day = { ...(S.days[key] || {}) };
+    day._dow = addDays(start, i).getDay();
+    out.push(day);
+  }
+  return out;
 }
 
 /* ── buddy simulation (Sunny) ──────────────── */
@@ -56,12 +135,12 @@ const BUDDY_NOTES = [
   'rain, zero motivation, did it anyway. your move 😄',
   'if you\'ve done it, stamp it! if not — five tiny minutes, go!',
 ];
+const REACTIONS = ['❤️', '🎉', '⭐', '🥳', '💛'];
 function hashStr(s) {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
   return h >>> 0;
 }
-/* Sunny checks in at user's target time + deterministic offset (−25..+95 min) */
 function buddyCheckinDate(key) {
   const [hh, mm] = S.time.split(':').map(Number);
   const offset = (hashStr(key + '🌻') % 121) - 25;
@@ -70,7 +149,6 @@ function buddyCheckinDate(key) {
 }
 function buddyNoteFor(key) { return BUDDY_NOTES[hashStr(key) % BUDDY_NOTES.length]; }
 
-/* Materialize buddy check-ins up to now (idempotent) */
 function syncBuddy() {
   const start = new Date(S.createdAt + 'T12:00');
   for (let d = start; dateKey(d) <= todayKey(); d = addDays(d, 1)) {
@@ -79,36 +157,72 @@ function syncBuddy() {
     if (!day.buddy && new Date() >= buddyCheckinDate(key)) {
       day.buddy = buddyCheckinDate(key).getTime();
       day.buddyNote = buddyNoteFor(key);
-      if (key === todayKey() && document.body.dataset.ready) {
-        renderHome(true);      // buddy stamps live while app is open
-        chime();
+      if (key === todayKey() && document.body.dataset.ready) { renderHome(true); chime(); }
+    }
+    /* Sunny reacts to your stamp a couple of minutes later */
+    if (day.you && !day.react && Date.now() >= (day.reactAt || 0)) {
+      if (!day.reactAt) {
+        day.reactAt = day.you + 60000 + (hashStr(key + 'r') % 120000);
+      } else {
+        day.react = REACTIONS[hashStr(key + '💛') % REACTIONS.length];
+        if (key === todayKey() && document.body.dataset.ready) { renderHome(); chime(); }
       }
     }
   }
   save();
 }
 
-/* ── streaks & freezes (pure function of days) ── */
+/* ── streaks & freezes ─────────────────────── */
 function computeStreaks() {
   const start = new Date(S.createdAt + 'T12:00');
-  let pair = 0, you = 0, freezes = 0, earnedRun = 0;
+  let pair = 0, you = 0, freezes = 0, earnedRun = 0, totalStamps = 0;
   const frozen = {};
   for (let d = start; dateKey(d) <= todayKey(); d = addDays(d, 1)) {
     const key = dateKey(d), day = S.days[key] || {}, isToday = key === todayKey();
     if (day.you) {
-      you++; earnedRun++;
+      you++; earnedRun++; totalStamps++;
       if (earnedRun % 7 === 0 && freezes < 3) freezes++;
       pair = day.buddy ? pair + 1 : pair;
     } else if (isToday) {
       /* today isn't a miss yet */
     } else if (freezes > 0) {
-      freezes--; frozen[key] = true;      // streak survives, run resets
-      earnedRun = 0;
+      freezes--; frozen[key] = true; earnedRun = 0;
     } else {
       pair = 0; you = 0; earnedRun = 0;
     }
   }
-  return { pair, you, freezes, frozen };
+  return { pair, you, freezes, frozen, totalStamps };
+}
+function titleFor(totalStamps) {
+  const t = TITLES.find(([n]) => totalStamps >= n);
+  return t ? t[1] : '';
+}
+
+/* ── sticker drop engine ───────────────────── */
+function rollSticker(early) {
+  let tiers = Object.entries(RARITY).map(([k, v]) => [k, early ? v.early : v.weight]);
+  if (S.pity >= 6) tiers = tiers.filter(([k]) => k === 'rare' || k === 'precious');
+  const total = tiers.reduce((a, [, w]) => a + w, 0);
+  let r = Math.random() * total, tier = tiers[tiers.length - 1][0];
+  for (const [k, w] of tiers) { if ((r -= w) < 0) { tier = k; break; } }
+  const pool = STICKERS.filter((s) => s.rarity === tier);
+  const pick = pool[Math.floor(Math.random() * pool.length)];
+  S.pity = (tier === 'rare' || tier === 'precious') ? 0 : S.pity + 1;
+  S.stickers[pick.id] = (S.stickers[pick.id] || 0) + 1;
+  return pick;
+}
+function grantSticker(day, early) {
+  const s = rollSticker(early);
+  /* stick along the page margins so it never covers the note field or buttons */
+  const leftSide = Math.random() < 0.5;
+  day.sticker = {
+    id: s.id,
+    x: leftSide ? 1 + Math.random() * 8 : 76 + Math.random() * 10,
+    y: 34 + Math.random() * 46,
+    rot: -18 + Math.random() * 36,
+  };
+  save();
+  return s;
 }
 
 /* ── audio & haptics ───────────────────────── */
@@ -146,11 +260,42 @@ function chime() {
     });
   } catch { /* audio unavailable */ }
 }
+function peelSound() {
+  if (!S.sound) return;
+  try {
+    const c = ctx(), t = c.currentTime;
+    const buf = c.createBuffer(1, c.sampleRate * 0.25, c.sampleRate);
+    const ch = buf.getChannelData(0);
+    for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * (i / ch.length) * 0.6;
+    const n = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
+    n.buffer = buf; f.type = 'bandpass'; f.frequency.setValueAtTime(1200, t);
+    f.frequency.exponentialRampToValueAtTime(4200, t + 0.22);
+    g.gain.value = 0.22;
+    n.connect(f).connect(g).connect(c.destination); n.start(t);
+  } catch { /* audio unavailable */ }
+}
+function sparkle(rarity) {
+  if (!S.sound) return;
+  try {
+    const c = ctx(), t = c.currentTime;
+    const notes = rarity === 'precious' ? [523, 659, 784, 1047] :
+                  rarity === 'rare' ? [523, 659, 784] : [523, 659];
+    notes.forEach((hz, i) => {
+      const o = c.createOscillator(), g = c.createGain();
+      o.type = 'sine'; o.frequency.value = hz;
+      const dt = i * 0.09;
+      g.gain.setValueAtTime(0.0001, t + dt);
+      g.gain.exponentialRampToValueAtTime(0.14, t + dt + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, t + dt + 0.6);
+      o.connect(g).connect(c.destination); o.start(t + dt); o.stop(t + dt + 0.65);
+    });
+  } catch { /* audio unavailable */ }
+}
 function buzz(ms) { if (S.haptics && navigator.vibrate) navigator.vibrate(ms); }
 
 /* ── screens & nav ─────────────────────────── */
 function show(name) {
-  ['onboarding', 'home', 'journal', 'settings'].forEach((s) => {
+  ['onboarding', 'home', 'journal', 'stickers', 'settings'].forEach((s) => {
     $('#screen-' + s).hidden = s !== name;
   });
   $('#tabbar').hidden = name === 'onboarding';
@@ -158,6 +303,7 @@ function show(name) {
     t.classList.toggle('active', t.dataset.screen === name));
   if (name === 'home') renderHome();
   if (name === 'journal') renderJournal();
+  if (name === 'stickers') renderStickerBook();
   if (name === 'settings') renderSettings();
 }
 document.querySelectorAll('.tab').forEach((t) =>
@@ -182,11 +328,8 @@ document.querySelectorAll('[data-next]').forEach((b) => b.addEventListener('clic
 }));
 $('[data-finish]').addEventListener('click', () => {
   S = freshState(
-    $('#ob-name').value.trim(),
-    $('#ob-goal').value.trim(),
-    obCat,
-    $('#ob-time').value || '07:30'
-  );
+    $('#ob-name').value.trim(), $('#ob-goal').value.trim(),
+    obCat, $('#ob-time').value || '07:30');
   save(); obShow(3);
 });
 $('[data-start]').addEventListener('click', () => { syncBuddy(); show('home'); });
@@ -195,10 +338,13 @@ $('[data-start]').addEventListener('click', () => { syncBuddy(); show('home'); }
 function stampHTML(ts, opts = {}) {
   const time = new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
   const cls = 'stamp' + (opts.buddy ? ' buddy' : '') + (opts.late ? ' late' : '') +
-    (opts.animate ? ' animate' : '');
-  const word = opts.buddy ? 'showed up' : (opts.late ? 'made it' : 'showed up');
+    (opts.early ? ' early' : '') + (opts.animate ? ' animate' : '');
+  const word = opts.late ? 'made it' : (opts.early ? 'early bird' : 'showed up');
   return `<div class="${cls}"><span class="big-check">✓</span>` +
     `<span class="stamp-word">${word}</span><span class="stamp-time">${time}</span></div>`;
+}
+function flameTier(pair) {
+  return pair >= 30 ? 't4' : pair >= 14 ? 't3' : pair >= 7 ? 't2' : pair >= 3 ? 't2' : pair >= 1 ? 't1' : 't0';
 }
 
 function renderHome(animateBuddy = false) {
@@ -206,15 +352,24 @@ function renderHome(animateBuddy = false) {
 
   $('#today-date').textContent = niceDate(new Date());
   $('#goal-line').textContent = `${S.name} · ${S.goal}`;
+  $('#title-line').textContent = titleFor(st.totalStamps);
   $('#streak-num').textContent = st.pair;
-  $('#streak-badge').classList.toggle('zero', st.pair === 0);
+  const badge = $('#streak-badge');
+  badge.className = 'streak-badge ' + flameTier(st.pair);
+  badge.classList.toggle('zero', st.pair === 0);
   const [hh, mm] = S.time.split(':');
   $('#target-time').textContent = `${+hh}:${mm}`;
+
+  /* crown: who reached the page first today? */
+  const youFirst = day.you && day.buddy && day.you < day.buddy;
+  const buddyFirst = day.you && day.buddy && day.buddy < day.you;
 
   /* you */
   const youPhoto = $('#you-photo');
   if (day.you) {
-    youPhoto.innerHTML = stampHTML(day.you, { late: day.youLate });
+    youPhoto.innerHTML = stampHTML(day.you, { late: day.youLate, early: day.youEarly }) +
+      (youFirst ? '<span class="crown">👑</span>' : '') +
+      (day.react ? `<span class="react-doodle">${day.react}</span>` : '');
     $('#checkin-zone').classList.add('done');
     $('#note-field').style.display = '';
     $('#you-note').value = day.youNote || '';
@@ -228,7 +383,8 @@ function renderHome(animateBuddy = false) {
   /* buddy */
   const bp = $('#buddy-photo');
   if (day.buddy) {
-    bp.innerHTML = stampHTML(day.buddy, { buddy: true, animate: animateBuddy });
+    bp.innerHTML = stampHTML(day.buddy, { buddy: true, animate: animateBuddy }) +
+      (buddyFirst ? '<span class="crown">👑</span>' : '');
     $('#buddy-note').hidden = false;
     $('#buddy-note-text').textContent = '🌻 ' + (day.buddyNote || '');
   } else {
@@ -236,8 +392,33 @@ function renderHome(animateBuddy = false) {
     $('#buddy-note').hidden = true;
   }
 
+  /* today's sticker on the page */
+  const layer = $('#sticker-layer'); layer.innerHTML = '';
+  if (day.sticker) {
+    const s = BY_ID[day.sticker.id];
+    if (s) {
+      const el = document.createElement('div');
+      el.className = 'sticker-frame ' + s.rarity;
+      el.style.left = day.sticker.x + '%'; el.style.top = day.sticker.y + '%';
+      el.style.transform = `rotate(${day.sticker.rot}deg)`;
+      el.textContent = s.emoji;
+      layer.appendChild(el);
+    }
+  }
+
+  /* evening tension: the streak is on the line */
+  const tension = !day.you && new Date().getHours() >= 18;
+  $('#tension-line').hidden = !tension;
+  if (tension) {
+    $('#tension-line').textContent = st.pair > 0
+      ? `today's page is still open… 🔥 ${st.pair} on the line`
+      : 'today\'s page is still open…';
+  }
+  badge.classList.toggle('tension', tension && st.pair > 0);
+
   renderWeekStrip(st);
   renderSeals(st);
+  renderQuests();
   $('#freeze-line').textContent =
     st.freezes > 0
       ? `❄️ ${st.freezes} streak freeze${st.freezes > 1 ? 's' : ''} banked — a missed day won't break you`
@@ -271,7 +452,53 @@ function renderSeals(st) {
   });
 }
 
-/* check-in */
+/* ── quests ────────────────────────────────── */
+function activeQuests() {
+  const wk = weekKey(new Date()), h = hashStr(wk);
+  const picks = [];
+  for (let i = 0; picks.length < 3; i++) {
+    const q = QUESTS[(h + i * 7) % QUESTS.length];
+    if (!picks.includes(q)) picks.push(q);
+  }
+  return picks;
+}
+function renderQuests() {
+  const days = weekDays(), wk = weekKey(new Date());
+  const list = $('#quest-list'); list.innerHTML = '';
+  let allDone = true;
+  activeQuests().forEach((q) => {
+    const n = Math.min(q.count(days), q.goal), done = n >= q.goal;
+    allDone = allDone && done;
+    const el = document.createElement('div');
+    el.className = 'quest' + (done ? ' done' : '');
+    el.innerHTML =
+      `<div class="quest-row"><span>${q.text}</span>` +
+      `<span class="${done ? 'q-done' : ''}">${done ? '✓ done' : n + '/' + q.goal}</span></div>` +
+      `<div class="qbar"><i style="width:${(n / q.goal) * 100}%"></i></div>`;
+    list.appendChild(el);
+  });
+
+  /* race tally: who got to the page first this week */
+  const youWins = days.filter((d) => d.you && d.buddy && d.you < d.buddy).length;
+  const buddyWins = days.filter((d) => d.you && d.buddy && d.buddy < d.you).length;
+  $('#race-tally').textContent = `first to the page — you ${youWins} · Sunny ${buddyWins}`;
+
+  /* golden week reward: all three quests → precious sticker */
+  if (allDone && !S.questRewards[wk]) {
+    S.questRewards[wk] = true; save();
+    const pool = STICKERS.filter((s) => s.rarity === 'precious');
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    S.stickers[pick.id] = (S.stickers[pick.id] || 0) + 1; save();
+    setTimeout(() => openReveal(pick, 'golden week! all three quests done —'), 600);
+  }
+  if (S.questRewards[wk]) {
+    const g = document.createElement('div');
+    g.className = 'golden-week script'; g.textContent = '✨ golden week — all quests complete ✨';
+    list.appendChild(g);
+  }
+}
+
+/* ── check-in ──────────────────────────────── */
 $('#btn-checkin').addEventListener('click', () => {
   const key = todayKey();
   const day = (S.days[key] = S.days[key] || {});
@@ -280,21 +507,22 @@ $('#btn-checkin').addEventListener('click', () => {
   const [hh, mm] = S.time.split(':').map(Number);
   const target = new Date(); target.setHours(hh, mm, 0, 0);
   day.you = now.getTime();
+  day.youEarly = now <= target;
   day.youLate = now - target > 4 * 3600 * 1000;
+  const sticker = grantSticker(day, day.youEarly);
   save();
   thunk(); buzz(35);
   renderHome();
   const stamp = $('#you-photo .stamp');
-  if (stamp) {
-    stamp.classList.add('animate');
-    dustPuff($('#you-photo'));
-  }
-  maybeCelebrate();
+  if (stamp) { stamp.classList.add('animate'); dustPuff($('#you-photo')); }
+  /* anticipation gap, then the reveal — the pause IS the dopamine */
+  setTimeout(() => openReveal(sticker, 'a sticker fell out of today\'s page…'), 900);
 });
 
 $('#you-note').addEventListener('change', () => {
   const day = (S.days[todayKey()] = S.days[todayKey()] || {});
   day.youNote = $('#you-note').value.slice(0, 120); save();
+  renderQuests();
 });
 
 function dustPuff(container) {
@@ -310,7 +538,36 @@ function dustPuff(container) {
   }
 }
 
-/* milestones */
+/* ── sticker reveal flow ───────────────────── */
+let pendingSticker = null;
+function openReveal(sticker, lead) {
+  pendingSticker = sticker;
+  $('#reveal-lead').textContent = lead;
+  $('#mystery').hidden = false;
+  $('#reveal-result').hidden = true;
+  $('#reveal').hidden = false;
+}
+$('#mystery').addEventListener('click', () => {
+  const s = pendingSticker; if (!s) return;
+  peelSound(); buzz(20);
+  $('#mystery').hidden = true;
+  const frame = $('#reveal-sticker');
+  frame.className = 'sticker-frame big ' + s.rarity;
+  frame.textContent = s.emoji;
+  $('#reveal-name').textContent = s.name;
+  const tag = $('#reveal-rarity');
+  tag.className = 'rarity-tag ' + s.rarity;
+  tag.textContent = RARITY[s.rarity].label + (s.rarity === 'precious' ? ' ✦' : '');
+  $('#reveal-result').hidden = false;
+  sparkle(s.rarity);
+  if (s.rarity === 'precious') confetti();
+});
+$('#reveal-stick').addEventListener('click', () => {
+  $('#reveal').hidden = true; pendingSticker = null;
+  buzz(15); renderHome(); maybeCelebrate();
+});
+
+/* ── milestones ────────────────────────────── */
 function maybeCelebrate() {
   const st = computeStreaks();
   const hit = MILESTONES.filter((m) => st.pair >= m && !S.celebrated.includes(m)).pop();
@@ -340,6 +597,25 @@ function confetti() {
   }
 }
 
+/* ── sticker book ──────────────────────────── */
+function renderStickerBook() {
+  const owned = Object.keys(S.stickers).filter((id) => S.stickers[id] > 0);
+  $('#collect-progress').textContent =
+    `${owned.length} of ${STICKERS.length} collected — every check-in earns one`;
+  const grid = $('#sticker-grid'); grid.innerHTML = '';
+  STICKERS.forEach((s) => {
+    const n = S.stickers[s.id] || 0;
+    const cell = document.createElement('div');
+    cell.className = 'cell' + (n ? '' : ' locked');
+    cell.innerHTML =
+      `<div class="sticker-frame ${n ? s.rarity : ''}" style="position:relative">` +
+      `${n ? s.emoji : '?'}` +
+      `${n > 1 ? `<span class="count">×${n}</span>` : ''}</div>` +
+      `<div class="cell-name">${n ? s.name : '· · ·'}</div>`;
+    grid.appendChild(cell);
+  });
+}
+
 /* ── journal ───────────────────────────────── */
 function renderJournal() {
   const list = $('#journal-list'); list.innerHTML = '';
@@ -354,6 +630,7 @@ function renderJournal() {
   }
   keys.forEach((key) => {
     const day = S.days[key] || {};
+    const sk = day.sticker && BY_ID[day.sticker.id];
     const el = document.createElement('div');
     el.className = 'journal-day';
     const youCls = day.you ? 'on' : (st.frozen[key] ? 'froze' : '');
@@ -362,6 +639,7 @@ function renderJournal() {
       `<div class="mini-stamps">` +
       `<div class="mini ${youCls}">${day.you ? '✓' : (st.frozen[key] ? '❄' : '·')}</div>` +
       `<div class="mini buddy ${day.buddy ? 'on' : ''}">${day.buddy ? '✓' : '·'}</div>` +
+      `${sk ? `<div class="mini" title="${sk.name}">${sk.emoji}</div>` : ''}` +
       `</div>` +
       `<div class="jd-note">${day.youNote ? '“' + escapeHTML(day.youNote) + '”' : ''}</div>`;
     list.appendChild(el);
@@ -395,4 +673,4 @@ $('#btn-reset').addEventListener('click', () => {
 if (!S) { show('onboarding'); obShow(0); }
 else { syncBuddy(); show('home'); }
 document.body.dataset.ready = '1';
-setInterval(syncBuddy, 30 * 1000);   // Sunny can stamp while the app is open
+setInterval(syncBuddy, 30 * 1000);   // Sunny can stamp & react while the app is open

@@ -78,9 +78,10 @@
       <div>
         <div class="script lg" id="today-date">—</div>
         <div class="goal-line" id="goal-line">—</div>
+        <div class="title-line script" id="title-line"></div>
       </div>
       <div class="streak-badge" id="streak-badge" title="pair streak">
-        <span class="flame">🔥</span><span id="streak-num">0</span>
+        <span class="flame" id="flame">🔥</span><span id="streak-num">0</span>
       </div>
     </header>
 
@@ -125,9 +126,27 @@
 
       <div class="week-strip" id="week-strip"></div>
       <div class="seal-row" id="seal-row"></div>
+      <div class="sticker-layer" id="sticker-layer" aria-hidden="true"></div>
+      <div class="tension-line script" id="tension-line" hidden></div>
+    </div>
+
+    <div class="quest-card page-card" id="quest-card">
+      <div class="paperclip"></div>
+      <div class="quest-head">
+        <span class="script quest-title">this week's quests</span>
+        <span class="race-tally" id="race-tally"></span>
+      </div>
+      <div id="quest-list"></div>
     </div>
 
     <div class="freeze-line" id="freeze-line"></div>
+  </section>
+
+  <!-- ══════════ STICKER BOOK ══════════ -->
+  <section id="screen-stickers" class="screen" hidden>
+    <h2 class="script lg screen-title">sticker book</h2>
+    <p class="hint collect-progress" id="collect-progress"></p>
+    <div class="sticker-grid" id="sticker-grid"></div>
   </section>
 
   <!-- ══════════ JOURNAL ══════════ -->
@@ -154,6 +173,22 @@
     </div>
   </section>
 
+  <!-- ══════════ STICKER REVEAL ══════════ -->
+  <div id="reveal" class="celebrate" hidden>
+    <div class="celebrate-card page-card reveal-card">
+      <p class="script reveal-lead" id="reveal-lead">a sticker fell out of today's page…</p>
+      <button class="mystery" id="mystery" aria-label="peel the sticker">
+        <span class="mystery-q">?</span>
+      </button>
+      <div class="reveal-result" id="reveal-result" hidden>
+        <div class="sticker-frame big" id="reveal-sticker"></div>
+        <div class="script reveal-name" id="reveal-name"></div>
+        <div class="rarity-tag" id="reveal-rarity"></div>
+        <button class="btn primary" id="reveal-stick">stick it in!</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ══════════ CELEBRATION OVERLAY ══════════ -->
   <div id="celebrate" class="celebrate" hidden>
     <div class="celebrate-card page-card">
@@ -169,6 +204,7 @@
 <nav class="tabbar" id="tabbar" hidden>
   <button class="tab active" data-screen="home"><span>📖</span>today</button>
   <button class="tab" data-screen="journal"><span>🗂️</span>journal</button>
+  <button class="tab" data-screen="stickers"><span>🌼</span>stickers</button>
   <button class="tab" data-screen="settings"><span>🪡</span>settings</button>
 </nav>
 

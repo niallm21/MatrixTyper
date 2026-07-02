@@ -17,6 +17,7 @@ TOOLS="${1:?tools dir}"; OUT="${2:?out dir}"
 SRC="$HERE/app/src/main"
 VERSION_NAME="$(grep -o 'versionName = "[^"]*"' "$HERE/app/build.gradle.kts" 2>/dev/null | cut -d'"' -f2 || true)"
 VERSION_NAME="${VERSION_NAME:-0.1.0}"
+VERSION_CODE="$(grep -o 'versionCode = [0-9]*' "$HERE/app/build.gradle.kts" 2>/dev/null | grep -o '[0-9]*' || true)"
 VERSION_CODE="${VERSION_CODE:-1}"
 
 APKTOOL_CP="$TOOLS/apktool-cli-3.0.2.jar:$TOOLS/apktool-lib-3.0.2.jar:$TOOLS/commons-cli-1.11.0.jar"
