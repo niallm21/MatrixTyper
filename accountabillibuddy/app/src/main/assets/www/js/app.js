@@ -8,7 +8,7 @@
 
 const STORE_KEY = 'abb.state.v1';
 const LOG_KEY = 'abb.log.v1';
-const APP_VERSION = '0.5.0';
+const APP_VERSION = '0.6.0';
 const MILESTONES = [3, 7, 14, 30, 60, 100];
 const $ = (sel) => document.querySelector(sel);
 
@@ -107,6 +107,9 @@ function migrate(s) {
   s.why = s.why || '';                     // the promise note
   if (s.reminder === undefined) s.reminder = true;
   if (s.proofRequired === undefined) s.proofRequired = false;
+  if (!s.deviceId) s.deviceId = 'd' + Math.random().toString(36).slice(2, 12);
+  s.server = s.server || { url: '', key: '' };
+  s.pair = s.pair || null;                 // {id, code, partnerName, lastEventId}
   return s;
 }
 /* tell the Android shell to schedule (or clear) the daily notification */
@@ -209,6 +212,7 @@ function giftFor(key) {
   return pool[hashStr(key + 'gift') % pool.length].id;
 }
 function syncBuddy() {
+  if (S.pair) return;                       // a real buddy replaces Sunny
   const start = new Date(S.createdAt + 'T12:00');
   for (let d = start; dateKey(d) <= todayKey(); d = addDays(d, 1)) {
     const key = dateKey(d);
@@ -320,6 +324,86 @@ function grantSticker(day, early) {
   save();
   return s;
 }
+
+/* ── real buddy sync (Supabase REST dialect) ──
+   Append-only events polled every ~25s. The pair
+   code is the beta credential; real auth comes
+   with the production backend. */
+async function sb(path, opts = {}) {
+  const res = await fetch(S.server.url.replace(/\/$/, '') + '/rest/v1/' + path, {
+    method: opts.method || 'GET',
+    headers: {
+      apikey: S.server.key, Authorization: 'Bearer ' + S.server.key,
+      'Content-Type': 'application/json', Prefer: 'return=representation',
+    },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if (!res.ok) throw new Error('server ' + res.status);
+  return res.json();
+}
+function pushEvent(type, payload) {
+  if (!S.pair) return;
+  sb('events', { method: 'POST', body: {
+    pair_id: S.pair.id, device_id: S.deviceId, day: todayKey(), type, payload,
+  } }).catch(() => track('sync_push_fail', { type }));
+}
+async function syncPartner() {
+  if (!S.pair) return;
+  try {
+    if (!S.pair.partnerName) {
+      const members = await sb(`members?pair_id=eq.${S.pair.id}`);
+      const partner = members.find((m) => m.device_id !== S.deviceId);
+      if (partner) { S.pair.partnerName = partner.name; save(); renderHome(); }
+    }
+    const evs = await sb(
+      `events?pair_id=eq.${S.pair.id}&id=gt.${S.pair.lastEventId || 0}&order=id.asc`);
+    let changed = false;
+    for (const e of evs) {
+      S.pair.lastEventId = Math.max(S.pair.lastEventId || 0, e.id);
+      if (e.device_id === S.deviceId) continue;
+      const day = (S.days[e.day] = S.days[e.day] || {});
+      if (e.type === 'checkin') { day.buddy = e.payload.ts; day.buddyNote = e.payload.note || day.buddyNote; }
+      if (e.type === 'note') day.buddyNote = e.payload.text;
+      if (e.type === 'photo') day.buddyPhoto = e.payload.thumb;
+      if (e.type === 'react') {
+        const target = (S.days[e.payload.day] = S.days[e.payload.day] || {});
+        target.react = e.payload.emoji;
+      }
+      changed = true;
+    }
+    if (changed) {
+      save();
+      if (document.body.dataset.ready) { renderHome(true); chime(); }
+    }
+  } catch { track('sync_pull_fail'); }
+}
+async function createPair() {
+  const code = Array.from({ length: 6 }, () =>
+    'ABCDEFGHJKMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 31)]).join('');
+  const [pair] = await sb('pairs', { method: 'POST', body: { code } });
+  await sb('members', { method: 'POST', body: {
+    pair_id: pair.id, device_id: S.deviceId, name: S.name, goal: S.goal } });
+  S.pair = { id: pair.id, code, partnerName: null, lastEventId: 0 };
+  save(); pushTodayState(); track('pair_created');
+  return code;
+}
+async function joinPair(code) {
+  const pairs = await sb(`pairs?code=eq.${code}`);
+  if (!pairs.length) throw new Error('no such code');
+  await sb('members', { method: 'POST', body: {
+    pair_id: pairs[0].id, device_id: S.deviceId, name: S.name, goal: S.goal } });
+  S.pair = { id: pairs[0].id, code, partnerName: null, lastEventId: 0 };
+  save(); pushTodayState(); track('pair_joined');
+  return syncPartner();
+}
+/* after pairing, share today's page so the buddy isn't looking at blanks */
+function pushTodayState() {
+  const day = S.days[todayKey()] || {};
+  if (day.you) pushEvent('checkin', { ts: day.you, note: day.youNote || '' });
+  if (day.youNote) pushEvent('note', { text: day.youNote });
+  if (day.photo) pushEvent('photo', { thumb: makeThumb(day.photo) });
+}
+function makeThumb(dataUrl) { return dataUrl; }  // photos are already 480px jpegs
 
 /* ── audio & haptics ───────────────────────── */
 let AC = null;
@@ -482,14 +566,34 @@ function renderHome(animateBuddy = false) {
   $('#you-label').textContent = S.name ? S.name.toLowerCase() : 'you';
 
   /* buddy */
+  const buddyName = S.pair ? (S.pair.partnerName || 'your buddy') : 'Sunny 🌻';
+  document.querySelector('#slot-buddy .polaroid-label').textContent = buddyName;
   const bp = $('#buddy-photo');
   if (day.buddy) {
-    bp.innerHTML = stampHTML(day.buddy, { buddy: true, animate: animateBuddy }) +
+    bp.innerHTML =
+      (day.buddyPhoto ? `<img src="${day.buddyPhoto}" alt="buddy's proof">` : '') +
+      stampHTML(day.buddy, { buddy: true, animate: animateBuddy })
+        .replace('class="stamp', 'class="stamp' + (day.buddyPhoto ? ' on-photo' : '')) +
       (buddyFirst ? '<span class="crown">👑</span>' : '');
-    $('#buddy-note').hidden = false;
-    $('#buddy-note-text').textContent = '🌻 ' + (day.buddyNote || '');
-    /* unclaimed gift waits on Sunny's polaroid */
-    if (day.gift && !day.giftClaimed) {
+    $('#buddy-note').hidden = !day.buddyNote;
+    $('#buddy-note-text').textContent = (S.pair ? '💬 ' : '🌻 ') + (day.buddyNote || '');
+    /* cheer a real buddy by tapping their stamp (once a day) */
+    if (S.pair && !day.cheerSent) {
+      bp.style.cursor = 'pointer';
+      bp.onclick = () => {
+        const emoji = REACTIONS[Math.floor(Math.random() * REACTIONS.length)];
+        pushEvent('react', { day: todayKey(), emoji });
+        day.cheerSent = true; save();
+        chime(); buzz(20); track('cheer_sent');
+        const h = document.createElement('div');
+        h.className = 'cheer-hint script'; h.textContent = `you cheered ${emoji} — they'll see it!`;
+        $('#buddy-note').after(h);
+        setTimeout(() => h.remove(), 3500);
+        bp.onclick = null;
+      };
+    } else { bp.onclick = null; }
+    /* unclaimed gift waits on Sunny's polaroid (practice mode only) */
+    if (!S.pair && day.gift && !day.giftClaimed) {
       const g = document.createElement('button');
       g.className = 'gift-tag'; g.textContent = '🎁'; g.id = 'gift-tag';
       g.setAttribute('aria-label', 'open Sunny\'s gift');
@@ -501,7 +605,9 @@ function renderHome(animateBuddy = false) {
       });
     }
   } else {
-    bp.innerHTML = '<div class="empty-hint script">Sunny hasn\'t<br>stamped yet</div>';
+    bp.innerHTML = `<div class="empty-hint script">${S.pair
+      ? 'waiting for<br>' + escapeHTML((S.pair.partnerName || 'your buddy').split(' ')[0]) + '…'
+      : 'Sunny hasn\'t<br>stamped yet'}</div>`;
     $('#buddy-note').hidden = true;
   }
 
@@ -601,9 +707,13 @@ function activeQuests() {
   }
   return picks;
 }
+function buddyFirstName() {
+  return S.pair ? escapeHTML((S.pair.partnerName || 'your buddy').split(' ')[0]) : 'Sunny';
+}
 function renderQuests() {
   const days = weekDays(), wk = weekKey(new Date());
   const list = $('#quest-list'); list.innerHTML = '';
+  const bn = buddyFirstName();
   let allDone = true;
   activeQuests().forEach((q) => {
     const n = Math.min(q.count(days), q.goal), done = n >= q.goal;
@@ -611,7 +721,7 @@ function renderQuests() {
     const el = document.createElement('div');
     el.className = 'quest' + (done ? ' done' : '');
     el.innerHTML =
-      `<div class="quest-row"><span>${q.text}</span>` +
+      `<div class="quest-row"><span>${q.text.replace('Sunny', bn)}</span>` +
       `<span class="${done ? 'q-done' : ''}">${done ? '✓ done' : n + '/' + q.goal}</span></div>` +
       `<div class="qbar"><i style="width:${(n / q.goal) * 100}%"></i></div>`;
     list.appendChild(el);
@@ -620,7 +730,7 @@ function renderQuests() {
   /* race tally: who got to the page first this week */
   const youWins = days.filter((d) => d.you && d.buddy && d.you < d.buddy).length;
   const buddyWins = days.filter((d) => d.you && d.buddy && d.buddy < d.you).length;
-  $('#race-tally').textContent = `first to the page — you ${youWins} · Sunny ${buddyWins}`;
+  $('#race-tally').textContent = `first to the page — you ${youWins} · ${bn} ${buddyWins}`;
 
   /* golden week reward: all three quests → precious sticker */
   if (allDone && !S.questRewards[wk]) {
@@ -657,6 +767,7 @@ $('#btn-checkin').addEventListener('click', () => {
     early: !!day.youEarly, late: !!day.youLate,
     rarity: sticker.rarity,
   });
+  pushEvent('checkin', { ts: day.you, note: '' });
   thunk(); buzz(35);
   renderHome();
   const stamp = $('#you-photo .stamp');
@@ -733,6 +844,7 @@ $('#cam-shutter').addEventListener('click', () => {
   stopCamera();
   thunk(); buzz(25);
   track('proof_taken');
+  pushEvent('photo', { thumb: day.photo });
   renderHome();
   if (afterProof) { afterProof(); afterProof = null; }
 });
@@ -745,6 +857,7 @@ function prunePhotos() {
 $('#you-note').addEventListener('change', () => {
   const day = (S.days[todayKey()] = S.days[todayKey()] || {});
   day.youNote = $('#you-note').value.slice(0, 120); save();
+  pushEvent('note', { text: day.youNote });
   renderQuests();
 });
 
@@ -940,7 +1053,51 @@ function renderSettings() {
   $('#set-sound').checked = S.sound; $('#set-haptics').checked = S.haptics;
   $('#fb-count').textContent =
     `${LOG.events.length} moments captured · ${LOG.notes.length} notes jotted`;
+  $('#srv-url').value = S.server.url; $('#srv-key').value = S.server.key;
+  $('#pair-setup').hidden = !!S.pair;
+  $('#pair-active').hidden = !S.pair;
+  if (S.pair) {
+    $('#pair-code-show').textContent = S.pair.code;
+    $('#pair-status').textContent = S.pair.partnerName
+      ? `paired with ${S.pair.partnerName} — everything on this page is real now`
+      : 'pair created — share the code below with your buddy';
+  } else {
+    $('#pair-status').textContent =
+      'practice mode — Sunny is filling in until a real buddy joins';
+  }
 }
+function saveServerInputs() {
+  S.server.url = $('#srv-url').value.trim();
+  S.server.key = $('#srv-key').value.trim();
+  save();
+  if (!S.server.url || !S.server.key) {
+    alert('Server URL and key first — ask the maker for yours.');
+    return false;
+  }
+  return true;
+}
+$('#pair-create').addEventListener('click', async () => {
+  if (!saveServerInputs()) return;
+  try {
+    await createPair();
+    renderSettings(); buzz(20);
+  } catch { alert('Could not reach the server — check the URL and key.'); }
+});
+$('#pair-join').addEventListener('click', async () => {
+  if (!saveServerInputs()) return;
+  const code = $('#pair-code-in').value.trim().toUpperCase();
+  if (code.length !== 6) return $('#pair-code-in').focus();
+  try {
+    await joinPair(code);
+    renderSettings(); renderHome(); buzz(20);
+  } catch { alert('That code didn\'t match a pair — double-check it.'); }
+});
+$('#pair-leave').addEventListener('click', () => {
+  if (confirm('Disconnect from your buddy? Your scrapbook stays; theirs does too.')) {
+    S.pair = null; save(); track('pair_left');
+    renderSettings(); renderHome();
+  }
+});
 $('#btn-save-settings').addEventListener('click', () => {
   S.name = $('#set-name').value.trim() || S.name;
   S.goal = $('#set-goal').value.trim() || S.goal;
@@ -1043,6 +1200,9 @@ $('#report-close').addEventListener('click', () => ($('#report-modal').hidden = 
 
 /* ── boot ──────────────────────────────────── */
 if (!S) { show('onboarding'); obShow(0); }
-else { syncBuddy(); syncReminder(); show('home'); }
+else { syncBuddy(); syncPartner(); syncReminder(); show('home'); }
 document.body.dataset.ready = '1';
-setInterval(syncBuddy, 30 * 1000);   // Sunny can stamp & react while the app is open
+setInterval(() => { syncBuddy(); syncPartner(); }, 25 * 1000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && S) { syncBuddy(); syncPartner(); }
+});

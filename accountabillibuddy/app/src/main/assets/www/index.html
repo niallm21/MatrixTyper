@@ -179,6 +179,26 @@
       <label class="toggle-row"><span>Haptics</span><input id="set-haptics" type="checkbox" checked></label>
       <button class="btn primary" id="btn-save-settings">save</button>
       <hr class="rule">
+      <div class="pair-section">
+        <span class="script fb-title">real buddy</span>
+        <div id="pair-status" class="hint small"></div>
+        <div id="pair-setup">
+          <label class="field"><span>Server URL</span>
+            <input id="srv-url" type="url" placeholder="https://xxxx.supabase.co"></label>
+          <label class="field"><span>Server key (anon)</span>
+            <input id="srv-key" type="password" placeholder="paste the anon key"></label>
+          <button class="btn primary" id="pair-create">create a pair code</button>
+          <label class="field"><span>…or join with a code</span>
+            <input id="pair-code-in" type="text" maxlength="6" placeholder="ABCDEF"
+                   autocapitalize="characters" style="text-transform:uppercase"></label>
+          <button class="btn" id="pair-join">join my buddy</button>
+        </div>
+        <div id="pair-active" hidden>
+          <p class="script pair-code-show" id="pair-code-show"></p>
+          <button class="btn danger ghost" id="pair-leave">disconnect from buddy</button>
+        </div>
+      </div>
+      <hr class="rule">
       <div class="fb-section">
         <span class="script fb-title">feedback &amp; tuning</span>
         <p class="hint small">The app keeps a private diary of how it's being used —

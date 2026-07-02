@@ -416,6 +416,12 @@ body {
   background:rgba(255,253,246,.25); backdrop-filter:blur(1px); }
 .mini.photo { background-size:cover; background-position:center; border-color:var(--marigold); }
 
+/* ── real buddy pairing ─────────────────────── */
+.pair-code-show { font-size:2.2rem; text-align:center; letter-spacing:.35em; margin:8px 0; }
+.pair-section .btn { margin-top:6px; }
+#pair-status { margin:4px 0 10px; }
+.cheer-hint { text-align:center; font-size:1.15rem; color:var(--ink-soft); margin-top:8px; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration:.01ms !important; transition-duration:.01ms !important; }
 }
